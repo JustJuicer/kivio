@@ -1,0 +1,44 @@
+name: Floating chat · Windows x64
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['floating-*']
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - run: npm run build:swift
+      - run: npm run package:check
+      - run: npm run icons:check
+      - run: npx tsc --noEmit
+      - run: npx tauri build --bundles nsis
+      - name: Verify installer and compute SHA-256
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($files.Count -ne 1) { throw "Expected one x64 NSIS installer" }
+          $file = $files[0]
+          $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($file.Name)" | Set-Content "$($file.DirectoryName)/SHA256SUMS.txt" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kivio-floating-chat-windows-x64
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
+          if-no-files-found: error
