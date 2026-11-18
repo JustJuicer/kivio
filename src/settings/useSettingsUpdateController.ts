@@ -87,7 +87,7 @@ export function useSettingsUpdateController(autoCheckUpdate: boolean | null | un
   }, [port])
 
   const openGithubReleases = useCallback(async () => {
-    try { await port.openExternal('https://github.com/ZMGID/kivio/releases') }
+    try { await port.openExternal('https://github.com/JustJuicer/kivio/releases') }
     catch (error) { console.error('Open GitHub releases failed:', error) }
   }, [port])
 

@@ -23,6 +23,13 @@ function port(overrides: Partial<SettingsUpdatePort> = {}): SettingsUpdatePort {
 }
 
 describe('useSettingsUpdateController', () => {
+  it('opens the fork releases rather than offering an upstream replacement', async () => {
+    const updatePort = port()
+    const { result } = renderHook(() => useSettingsUpdateController(false, updatePort))
+    await act(async () => { await result.current.openGithubReleases() })
+    expect(updatePort.openExternal).toHaveBeenCalledWith('https://github.com/JustJuicer/kivio/releases')
+  })
+
   it('ignores a stale check after the newer result becomes available', async () => {
     const old = deferred<UpdateInfo>()
     const newer = deferred<UpdateInfo>()

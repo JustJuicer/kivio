@@ -21,7 +21,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --replace-registry-host=always
       - run: npm run build:swift
       - run: npm run package:check
       - run: npm run icons:check
@@ -35,6 +35,18 @@ jobs:
           $file = $files[0]
           $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($file.Name)" | Set-Content "$($file.DirectoryName)/SHA256SUMS.txt" -Encoding ascii
+      - name: Test a clean install on the disposable Windows runner
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe).FullName
+          $dest = Join-Path $env:RUNNER_TEMP 'KivioInstall'
+          $p = Start-Process $installer -ArgumentList '/S', "/D=$dest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer exited $($p.ExitCode)" }
+          $binary = Join-Path $dest 'kivio.exe'
+          if (!(Test-Path $binary -PathType Leaf)) { throw "Missing installed executable: $binary" }
+          $p = Start-Process $binary -PassThru
+          if ($p.WaitForExit(10000)) { throw "Kivio exited at startup: $($p.ExitCode)" }
+          Stop-Process -Id $p.Id
       - uses: actions/upload-artifact@v4
         with:
           name: Kivio-floating-chat-windows-x64
