@@ -329,7 +329,10 @@ export function useLensSessionCoordinator(options: LensSessionCoordinatorOptions
     setFreezeFramePreviewId(imageId)
   }, [])
 
-  const consumeFreezeFrame = useCallback(() => setFreezeFrameImageId(''), [])
+  const consumeFreezeFrame = useCallback((keepPreview = true) => {
+    setFreezeFrameImageId('')
+    if (!keepPreview) setFreezeFramePreviewId('')
+  }, [])
 
   return {
     acceptsRequestEvent,

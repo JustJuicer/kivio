@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../api/tauri'
 import { chatApi } from './api'
 import Chat from './Chat'
+import { getRememberedChatGeometry, rememberChatGeometry } from './persistence'
 
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onFocusChanged: async () => () => {} }) }))
 vi.mock('@xterm/xterm', () => ({ Terminal: class {} }))
@@ -13,7 +14,7 @@ vi.mock('../api/settingsCache', async original => ({
 }))
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear() })
 
-function openChat() {
+function openChat(onContentReady?: () => void) {
   for (const key of Object.keys(api) as Array<keyof typeof api>) {
     if (key.startsWith('on') && typeof api[key] === 'function') vi.spyOn(api, key).mockResolvedValue(() => {})
   }
@@ -24,7 +25,7 @@ function openChat() {
   vi.spyOn(chatApi, 'getConversations').mockResolvedValue([{ ...recent, preview: '', message_count: 1 }])
   vi.spyOn(chatApi, 'getConversationWindow').mockResolvedValue({ ...recent, messages: [{ id: 'q', role: 'user', content: 'Earlier question', timestamp: 1 }] })
   window.history.replaceState(null, '', '#chat')
-  return render(<Chat onSettingsChange={() => {}} />)
+  return render(<Chat onSettingsChange={() => {}} onContentReady={onContentReady} />)
 }
 
 it('accepts repeated capture intents and switches chats from the compact conversation list', async () => {
@@ -63,6 +64,25 @@ it('shows only confirmed window pin state and keeps restore available after a na
   expect(restore).toBeEnabled()
   await act(async () => { fireEvent.click(restore) })
   expect(screen.getByRole('button', { name: '悬浮聊天' })).toBeInTheDocument()
+})
+
+it('waits for cold-window placement and keeps compact moves out of the normal restore geometry', async () => {
+  const normal = { x: 40, y: 60, width: 1100, height: 700 }
+  const compact = { x: 200, y: 300, width: 480, height: 480 }
+  rememberChatGeometry(normal)
+  const geometry = vi.spyOn(chatApi, 'setFloatingMode').mockResolvedValue(undefined)
+  let shown!: () => void
+  const reveal = new Promise<void>(resolve => { shown = resolve })
+  openChat(() => reveal)
+  await act(async () => { window.dispatchEvent(new Event('kivio:enter-floating-chat')) })
+  expect(geometry).not.toHaveBeenCalled()
+  await act(async () => { shown() })
+  const restore = await screen.findByRole('button', { name: '恢复主界面' })
+  rememberChatGeometry(compact)
+  expect(getRememberedChatGeometry()).toEqual(normal)
+  await act(async () => { fireEvent.click(restore) })
+  rememberChatGeometry({ ...normal, x: 88 })
+  expect(getRememberedChatGeometry()).toEqual({ ...normal, x: 88 })
 })
 
 it('switches the existing chat composer into a compact window and back without replacing it', async () => {

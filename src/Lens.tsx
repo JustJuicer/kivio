@@ -6,7 +6,6 @@ import { api, type LensStreamPayload, type LensTranslateStreamPayload, type Lens
 import { getSettingsCached, setTranslateCardSizeCached } from './api/settingsCache'
 import { ChatMarkdown } from './chat/ChatMarkdown'
 import { Button } from './components/Button'
-import { notifyError } from './components/appNoticeStore'
 import { i18n, type Lang } from './components/i18n'
 import { isWebSearchConfigured } from './settings/webSearch'
 import { copyToClipboard } from './utils/clipboard'
@@ -159,6 +158,7 @@ export default function Lens() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   const [keepFullscreen, setKeepFullscreen] = useState(() => readModeFromHash() !== 'translateText')
   const [surfaceDormant, setSurfaceDormant] = useState(false)
+  const [handoffFailure, setHandoffFailure] = useState<{ imageId: string; message: string } | null>(null)
   const {
     applyReplacementPayload,
     applyTranslationPayload,
@@ -420,6 +420,7 @@ export default function Lens() {
     // Invalidate/cancel the previous opening before any settings or reset-payload
     // await can allow its stream to publish into the newly opening surface.
     const opening = requestedOpening ?? beginOpening()
+    setHandoffFailure(null)
     const { first: firstEntry } = opening
     const curMode = readModeFromHash()
     await loadLensSettings(curMode)
@@ -959,6 +960,7 @@ export default function Lens() {
       return
     }
     const p: Point = { x: e.clientX, y: e.clientY }
+    if (handoffFailure) setHandoffFailure(null)
     startDrag(p)
   }
 
@@ -1256,7 +1258,7 @@ export default function Lens() {
         hide: () => api.lensOpenFloatingChat(imageId),
       })
     } catch (error) {
-      if (isOpeningCurrent(opening)) notifyError(`${t.lensError}: ${String(error)}`)
+      if (isOpeningCurrent(opening)) setHandoffFailure({ imageId, message: String(error) })
     }
   }
 
@@ -1332,8 +1334,12 @@ export default function Lens() {
         return
       }
       const newId = result.imageId
+      if (mode === 'chat') {
+        // A retry by reselecting will use live pixels, not the consumed frozen frame.
+        consumeFreezeFrame(false)
+        return await openCapturedChat(newId)
+      }
       consumeFreezeFrame()
-      if (mode === 'chat') return await openCapturedChat(newId)
       captureImage(newId)
       // 不清 freezeFramePreview：截图后仍把冻结帧作为全屏背景保留，直到按 Esc 关闭 Lens
       // （enterSelect / resetAfterHide 会在重开 / 隐藏时清理）。
@@ -1836,6 +1842,14 @@ export default function Lens() {
       onMouseUp={handleMouseUp}
       data-tauri-drag-region="false"
     >
+      {handoffFailure && stage === 'select' && (
+        <div className="absolute top-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-[var(--theme-surface)] p-3 shadow-lg"
+          onMouseDown={e => e.stopPropagation()} onMouseMove={e => e.stopPropagation()} onMouseUp={e => e.stopPropagation()}>
+          <p role="alert">{t.lensError}: {handoffFailure.message}</p>
+          <Button onClick={() => void openCapturedChat(handoffFailure.imageId)}>{t.chatRetry}</Button>
+          <Button onClick={() => void closeAfterReset()}>{t.cancel}</Button>
+        </div>
+      )}
       {(stage === 'select' || keepFullscreen) && freezeFramePreview && (
         <canvas
           ref={freezeCanvasRef}

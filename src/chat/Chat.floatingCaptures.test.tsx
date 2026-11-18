@@ -72,10 +72,13 @@ it.each([false, true])('keeps ownership of an open conversation draft (already f
     if (floating) {
       fireEvent.click(await screen.findByRole('button', { name: '悬浮聊天' }))
       await screen.findByRole('button', { name: '恢复主界面' })
+      fireEvent.click(screen.getByRole('button', { name: '会话列表' }))
+      await screen.findByRole('dialog')
     }
     transport.take.mockResolvedValueOnce(['C:\\stage\\capture.png'])
     await act(async () => { wake() })
     await screen.findByRole('button', { name: '恢复主界面' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     const target = getComposerDraft(floating ? id : draftKey(null))
     expect(target?.attachments.map(a => a.name)).toEqual(['capture.png'])
     expect(getComposerDraft(id)?.input).toBe('original draft')

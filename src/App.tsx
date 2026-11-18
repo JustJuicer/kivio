@@ -15,10 +15,9 @@ import {
   isChatWindowPlacementVisible,
   isChatPath,
   isChatSettingsPath,
-  rememberChatGeometry,
   rememberCurrentChatRoute,
   restoreChatWindowGeometry,
-  snapshotChatWindowGeometry,
+  persistNormalChatGeometry,
 } from './chat/persistence'
 import { isChatPopoutPath } from './chat/popout/popoutRoutes'
 import { ChatErrorBoundary } from './chat/ChatErrorBoundary'
@@ -426,8 +425,7 @@ function App() {
     if (isChatPopoutPath(hashPath())) return
     try {
       const win = (await import('@tauri-apps/api/window')).getCurrentWindow()
-      const geometry = await snapshotChatWindowGeometry(win)
-      if (geometry) rememberChatGeometry(geometry)
+      await persistNormalChatGeometry(win)
     } catch (err) {
       console.error('[App] Failed to remember chat window geometry:', err)
     }
@@ -459,16 +457,15 @@ function App() {
 
   // 首次创建 chat 窗口时后端保持 hidden，把 show 交给前端；此处再把 show 从“App 挂载即弹出”
   // 推迟到“Chat 首屏内容就绪”（onContentReady → revealChatWindowNow），避免窗口弹出后还在转圈。
-  const revealedRef = useRef(false)
+  const revealPromise = useRef<Promise<void> | null>(null)
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const revealChatWindowNow = useCallback(() => {
-    if (revealedRef.current) return
-    revealedRef.current = true
+    if (revealPromise.current) return revealPromise.current
     if (revealTimerRef.current !== undefined) {
       clearTimeout(revealTimerRef.current)
       revealTimerRef.current = undefined
     }
-    void revealChatWindow()
+    return revealPromise.current = revealChatWindow()
   }, [revealChatWindow])
 
   useLayoutEffect(() => {
@@ -477,11 +474,8 @@ function App() {
     // 不变量：chat 是专用窗口，其 hash 恒为 #chat（含子路由），mode 一旦为 'chat' 便不再变。
     // 本兜底据此成立——若未来 chat 窗允许 mode 离开 'chat'，cleanup 会清掉未触发的兜底 timer
     // 而新分支早退，可能导致窗口永久 hidden；届时需改为窗口存活期内独立保证 reveal。
-    // 已 reveal 过（防御性：正常不会二次进入）→ 直接校正一次几何/可见性。
-    if (revealedRef.current) {
-      void revealChatWindow()
-      return
-    }
+    // A reveal already in flight owns initial placement; never start a second restore.
+    if (revealPromise.current) return
     // 兜底：内容就绪信号 3s 内未到达（chunk 加载失败 / 组件抛错被 ErrorBoundary 接住 / 信号丢失）
     // 也强制 show，绝不让窗口永久 hidden。
     revealTimerRef.current = setTimeout(() => {
@@ -493,7 +487,7 @@ function App() {
         revealTimerRef.current = undefined
       }
     }
-  }, [mode, revealChatWindow, revealChatWindowNow])
+  }, [mode, revealChatWindowNow])
 
   useEffect(() => {
     if (mode !== 'chat') return

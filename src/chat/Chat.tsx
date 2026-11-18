@@ -221,7 +221,7 @@ interface ChatProps {
    * “Chat 首屏可渲染”，避免窗口弹出后仍在转圈。初始视图为设置页时，就绪信号来自
    * SettingsShell 的 onReady；其余视图挂载后即视为骨架就绪。
    */
-  onContentReady?: () => void
+  onContentReady?: () => void | Promise<void>
 }
 
 /**
@@ -377,11 +377,9 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
     return await tasksLeaveGuardRef.current?.() ?? true
   }, [])
   // 首屏就绪只发一次。初始视图是设置页则等 SettingsShell.onReady；否则挂载后即发。
-  const contentReadyEmittedRef = useRef(false)
+  const contentReadyRef = useRef<Promise<void> | null>(null)
   const emitContentReady = useCallback(() => {
-    if (contentReadyEmittedRef.current) return
-    contentReadyEmittedRef.current = true
-    onContentReady?.()
+    return contentReadyRef.current ??= Promise.resolve(onContentReady?.())
   }, [onContentReady])
   const initialViewIsSettingsRef = useRef(chatView === 'settings')
   useLayoutEffect(() => {
@@ -2604,12 +2602,13 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
     }
   }, [navigation, popoutOwner])
 
-  const { floating, pinned, busy: floatingBusy, changeMode, togglePin } = useFloatingChat(i18n[uiLang].chatFloatingFailed)
+  const { floating, pinned, busy: floatingBusy, changeMode, togglePin } = useFloatingChat(i18n[uiLang].chatFloatingFailed, emitContentReady)
   useEffect(() => {
     const enter = (event: Event) => {
       const newDraft = event instanceof CustomEvent && event.detail?.newDraft === true
       if (chatView === 'onboarding' && !newDraft) return
       runAfterLeavingEditors(() => {
+        setSearchOpen(false)
         if (newDraft && (hashPath() !== 'chat' || currentConversationIdRef.current)) {
           navigation.startNewConversation()
           setChatView('conversation')

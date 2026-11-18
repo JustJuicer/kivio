@@ -116,6 +116,24 @@ describe('Lens selection during cold initialization', () => {
     expect(root.getAttribute('aria-hidden')).toBe('true')
   })
 
+  it('can retry the same crop when opening chat fails without capturing or sending again', async () => {
+    window.location.hash = '#lens?mode=chat'
+    mocks.takeReset.mockResolvedValue(JSON.stringify({ frame: { x: 0, y: 0, width: 1280, height: 800 } }))
+    mocks.capture.mockResolvedValue({ success: true, imageId: 'retained' })
+    mocks.openFloating.mockReset().mockRejectedValueOnce(new Error('cannot open chat')).mockResolvedValue(undefined)
+    const { container } = render(<Lens />)
+    await act(async () => {})
+    const root = container.firstElementChild!
+    fireEvent.mouseDown(root, { clientX: 100, clientY: 100 })
+    fireEvent.mouseMove(root, { clientX: 200, clientY: 180 })
+    await act(async () => { fireEvent.mouseUp(root, { clientX: 200, clientY: 180 }) })
+    expect(await within(container).findByRole('alert')).toHaveTextContent('cannot open chat')
+    await act(async () => { fireEvent.click(within(container).getByRole('button', { name: i18n.zh.chatRetry })) })
+    expect(mocks.openFloating.mock.calls).toEqual([['retained'], ['retained']])
+    expect(mocks.capture).toHaveBeenCalledOnce()
+    expect(container.firstElementChild).toHaveAttribute('aria-hidden', 'true')
+  })
+
   // Cover each resolution and DPI once; retain the 2560px / 150% rounding regression.
   const displayCases = [
     [1366, 768, 1], [1920, 1080, 1.1], [2560, 1440, 1.5],
