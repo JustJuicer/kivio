@@ -2413,6 +2413,12 @@ export const api = {
     if (!isTauriRuntime()) return Promise.resolve(() => {})
     return on<{ conversationIds: string[] }>('chat-popouts-changed', (payload) => listener(payload))
   },
+  chatTakeFloatingCaptures: () => isTauriRuntime()
+    ? invoke<string[]>('chat_take_floating_captures')
+    : Promise.resolve<string[]>([]),
+  onChatFloatingCapturesReady: (listener: () => void) => isTauriRuntime()
+    ? on<unknown>('chat-floating-captures-ready', () => listener())
+    : Promise.resolve(() => {}),
   onChatExternalSendReady: (listener: () => void) => {
     if (!isTauriRuntime()) return Promise.resolve(() => {})
     return on<unknown>('chat-external-send-ready', () => listener())
@@ -2619,6 +2625,7 @@ export const api = {
       messages,
       webSearch: options?.webSearch,
     }),
+  lensOpenFloatingChat: (imageId: string) => invoke<void>('lens_open_floating_chat', { imageId }),
   lensSendToChat: (imageId: string, question: string) =>
     invoke<{ success: boolean; requestId?: string; error?: string }>('lens_send_to_chat', {
       imageId,

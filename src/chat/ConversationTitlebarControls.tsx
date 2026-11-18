@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, PictureInPicture2 } from 'lucide-react'
 import { IconButton } from '../components/Button'
 import { i18n, type Lang } from '../components/i18n'
 import { ExternalModelSelector, RuntimePicker } from './RuntimePicker'
@@ -36,6 +36,8 @@ export interface ConversationTitlebarControlsProps {
   onSandboxChange: (value: string) => void | Promise<void>
   /** 当前会话有运行中的回合：锁住 CLI 沙盒档位。 */
   busy: boolean
+  onEnterFloating?: () => void
+  floatingBusy?: boolean
   onOpenPopout: (conversationId: string) => void
   onToggleDock: () => void
   /** 会话工作目录；无项目对话也可能有（Git 仍只给项目对话）。 */
@@ -71,6 +73,8 @@ export const ConversationTitlebarControls = memo(function ConversationTitlebarCo
   onApprovalPolicyChange,
   onSandboxChange,
   busy,
+  onEnterFloating,
+  floatingBusy,
   onOpenPopout,
   onToggleDock,
   workdir,
@@ -138,6 +142,11 @@ export const ConversationTitlebarControls = memo(function ConversationTitlebarCo
       </div>
       <div className="min-w-5 flex-1" data-tauri-drag-region />
       <div className="flex min-w-0 shrink items-center justify-end gap-1">
+        {onEnterFloating && (
+          <IconButton label={i18n[uiLang].chatFloating} variant="ghost" disabled={floatingBusy} onClick={onEnterFloating} data-tauri-drag-region="false">
+            <PictureInPicture2 size={16} />
+          </IconButton>
+        )}
         {conversationId && (
           <div className="shrink-0" data-tauri-drag-region="false">
             <IconButton

@@ -54,3 +54,26 @@ jobs:
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/release/bundle/nsis/SHA256SUMS.txt
           if-no-files-found: error
+
+  release:
+    needs: installer
+    if: startsWith(github.ref, 'refs/tags/floating-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Kivio-floating-chat-windows-x64
+          path: installer
+      - name: Publish tested installer from this tag
+        working-directory: installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          sha256sum --check SHA256SUMS.txt
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Kivio 悬浮对话 · $TAG (Windows x64)" \
+            --notes '下载下方的 setup.exe。先退出托盘中的 Kivio，并备份 %APPDATA%\com.zmair.kivio。沿用原版的模型设置和聊天历史。默认 Ctrl+Shift+G 框选，再次截图追加到同一输入框。' \
+            ./*-setup.exe SHA256SUMS.txt

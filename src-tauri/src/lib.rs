@@ -219,6 +219,8 @@ pub fn run() {
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 if window.label() == "chat" {
+                    #[cfg(target_os = "windows")]
+                    windows::floating::clear_capture_hide(window.app_handle());
                     let keep_alive = window
                         .app_handle()
                         .state::<AppState>()
@@ -288,6 +290,7 @@ pub fn run() {
                 if crate::chat::popout::is_popout_label(label) {
                     crate::chat::popout::on_popout_destroyed(window.app_handle(), label);
                 } else if label == "chat" {
+                    windows::floating::forget_window(window.app_handle());
                     window.app_handle().state::<voice_codex::VoiceCodexService>().cancel();
                     crate::chat::protocol::unsubscribe_label(
                         &window.app_handle().state::<AppState>(),
@@ -393,6 +396,7 @@ pub fn run() {
                 rapidocr::RapidOcrClient::new(offline_models),
             ));
             app.manage(chat::repository::ConversationRepository::default());
+            app.manage(windows::floating::FloatingChat::default());
             usage::start_price_refresh(app.handle().clone());
             app.manage(scheduled_tasks::ScheduledTasks::load(
                 app.path()
@@ -601,6 +605,9 @@ pub fn run() {
             lens_commands::lens_list_windows,
             lens_commands::lens_capture_window,
             lens_commands::lens_capture_region,
+            lens_commands::lens_open_floating_chat,
+            windows::floating::chat_take_floating_captures,
+            windows::floating::chat_set_floating_mode,
             lens_commands::lens_register_annotated_image,
             lens_commands::lens_copy_image_to_clipboard,
             lens_commands::lens_save_annotated_png,

@@ -5,6 +5,9 @@
 use std::fs;
 use std::path::PathBuf;
 
+pub(crate) mod floating;
+mod floating_state;
+
 use serde_json::json;
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
@@ -34,6 +37,9 @@ fn chat_window_size_for_visible_content(width: f64, height: f64) -> (f64, f64) {
 }
 
 pub fn apply_chat_window_min_size(window: &WebviewWindow, sidebar_expanded: bool) {
+    if floating::is_compact(window) {
+        return;
+    }
     let width = if sidebar_expanded {
         CHAT_MIN_INNER_WIDTH_EXPANDED
     } else {
@@ -98,7 +104,9 @@ pub(crate) fn apply_macos_traffic_light_position(window: &WebviewWindow) {
 
 /// Chat 作为普通桌面窗口：不置顶、不跨全 Space（与 Lens overlay 区分）。
 pub fn normalize_chat_window_behavior(window: &WebviewWindow) {
-    let _ = window.set_always_on_top(false);
+    if !floating::is_compact(window) {
+        let _ = window.set_always_on_top(false);
+    }
     let _ = window.set_skip_taskbar(false);
     #[cfg(target_os = "macos")]
     let _ = window.set_visible_on_all_workspaces(false);

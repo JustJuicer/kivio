@@ -526,13 +526,12 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
 
     let state = app.state::<AppState>();
     // begin_session 原子地完成 stale-busy 自愈、单会话占用、watchdog 代号和开启宽限期。
-    if state
+    let opening_seq = state
         .lens()
         .begin_session(active_overlay_window(app).is_some())
-        .is_err()
-    {
-        return Err("Lens already active".to_string());
-    }
+        .map_err(|_| "Lens already active".to_string())?;
+    #[cfg(not(target_os = "windows"))]
+    let _ = opening_seq;
     cleanup_lens_freeze_frame(app);
     state.lens().cancel_stream();
 
@@ -551,6 +550,15 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
         state.lens().replace_selection(None);
         state.lens().release_session();
         return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    if mode != "translateText" {
+        if let Err(error) = windows::floating::hide_for_capture(app, opening_seq) {
+            windows::floating::restore_after_capture(app, opening_seq);
+            state.lens().release_session();
+            return Err(error);
+        }
     }
 
     // 必须在 ensure_* 创建隐藏 WebView 之前记录。macOS 冷创建普通 NSWindow 可能短暂激活
@@ -579,12 +587,25 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
             Ok(w) => w,
             Err(e) => {
                 state.lens().release_session();
+                #[cfg(target_os = "windows")]
+                windows::floating::restore_after_capture(app, opening_seq);
                 #[cfg(target_os = "macos")]
                 windows::restore_previous_frontmost_app(app, state.frontmost_apps().lens());
                 return Err(e);
             }
         }
     };
+    #[cfg(target_os = "windows")]
+    if mode != "translateText" {
+        // Also release the temporary hide on an unexpected native destruction. Capture
+        // this opening's sequence: a late WM_DESTROY must not unhide the next opening.
+        let handle = app.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                windows::floating::restore_after_capture(&handle, opening_seq);
+            }
+        });
+    }
     // 结果暂存在 state.pending_selection，等前端 take 走。translate 模式写 None，避免遗留旧值。
     state.lens().replace_selection(pending_selection);
     // 把 mode 编码进 hash query，前端通过 location.hash 读取（'#lens?mode=translate'）
@@ -625,7 +646,14 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = window.show();
+        if let Err(error) = window.show() {
+            let _ = window.destroy();
+            cleanup_lens_freeze_frame(app);
+            #[cfg(target_os = "windows")]
+            windows::floating::restore_after_capture(app, opening_seq);
+            state.lens().release_session();
+            return Err(error.to_string());
+        }
         let _ = window.set_focus();
     }
     // 全模式注册全局 Esc 兜底：select 全屏阶段浮窗是模态的，webview 若没拿到键盘焦点
@@ -1150,6 +1178,40 @@ pub(crate) async fn lens_ask(
         })),
         Err(err) => Ok(serde_json::json!({ "success": false, "error": err })),
     }
+}
+
+/// Draft attachment only. Never enqueue an external send or take a path from the renderer.
+#[tauri::command]
+pub(crate) async fn lens_open_floating_chat(
+    app: AppHandle,
+    window: WebviewWindow,
+    image_id: String,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if window.label() != "lens" || state.lens().current_image_id().as_ref() != Some(&image_id) {
+        return Err("Expected the current Lens capture".into());
+    }
+    let path = state
+        .lens()
+        .image_path(&image_id)
+        .ok_or("Missing Lens capture")?;
+    let seq = state.lens().session_seq();
+    let copy = std::env::temp_dir().join(format!("lens-chat-{}.png", Uuid::new_v4()));
+    app.state::<windows::floating::FloatingChat>()
+        .inbox
+        .stage(&path, copy, || {
+            open_chat_window(&app)?;
+            let (_, original) = state.lens().close_captured_session(&image_id)?;
+            cleanup_temp_file(&original);
+            finish_lens_close(&app, seq);
+            Ok(())
+        })?;
+    // Cold renderer can miss this: it also drains the inbox after subscribing.
+    if let Err(error) = app.emit_to("chat", "chat-floating-captures-ready", ()) {
+        // Already committed. Reporting a failed handoff here would invite a duplicate retry.
+        eprintln!("[floating-chat] capture queued, ready notification failed: {error}");
+    }
+    Ok(())
 }
 
 /// 把 Lens 当前截图/问题发送到 AI 客户端，并在客户端对话中继续。
@@ -2301,13 +2363,23 @@ pub(crate) async fn lens_replace_translate(
 #[tauri::command]
 pub(crate) fn lens_close(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    state.lens().cancel_stream();
+    let closing_seq = state.lens().session_seq();
     if let Some((_id, path)) = state.lens().close_session_and_take_current() {
         cleanup_temp_file(&path);
     }
-    cleanup_lens_freeze_frame(&app);
-    unregister_lens_escape_shortcut(&app);
-    if let Some(window) = active_overlay_window(&app) {
+    finish_lens_close(&app, closing_seq);
+    Ok(())
+}
+
+fn finish_lens_close(app: &AppHandle, closing_seq: u64) {
+    let state = app.state::<AppState>();
+    if !state.lens().is_session_current(closing_seq) {
+        return;
+    }
+    state.lens().cancel_stream();
+    cleanup_lens_freeze_frame(app);
+    unregister_lens_escape_shortcut(app);
+    if let Some(window) = active_overlay_window(app) {
         // Windows：无 NSPanel 限制，且默认开启冻结帧（重建时背景是截屏冻结帧，不会白闪）
         // → 关闭即销毁，回收 renderer 内存。lens/translate 低频调用，偶尔付一次冷创建可接受。
         // 下次触发由 ensure_lens_window / ensure_translate_window 重建。
@@ -2330,8 +2402,9 @@ pub(crate) fn lens_close(app: AppHandle) -> Result<(), String> {
         }
     }
     #[cfg(target_os = "macos")]
-    windows::restore_previous_frontmost_app(&app, state.frontmost_apps().lens());
-    Ok(())
+    windows::restore_previous_frontmost_app(app, state.frontmost_apps().lens());
+    #[cfg(target_os = "windows")]
+    windows::floating::restore_after_capture(app, closing_seq);
 }
 
 /// 前端 lens select 态挂载时调用：取走（take，取一次清一次）AppState 里暂存的复位载荷

@@ -1,3 +1,9 @@
+> **JustJuicer 的 Windows 悬浮对话分支** · [本分支安装包](https://github.com/JustJuicer/kivio/releases) · [Windows 构建记录](https://github.com/JustJuicer/kivio/actions/workflows/floating-windows.yml)。下方原项目介绍中的徽章、截图与更新日志指向上游 Kivio，不包含本分支的改动。
+>
+> **安装前：** 退出托盘里的 Kivio，并在本机备份 `%APPDATA%\com.zmair.kivio`。本分支沿用正式版的应用标识和数据位置，以便继续使用已有模型设置、附件和历史；不是与原版并行运行的第二套客户端。备份可能包含 API Key，请勿上传。
+>
+> **截图提问：** Windows 默认 `Ctrl+Shift+G` 呼出 Lens（改过快捷键就用自己的绑定）。框选后，图片进入悬浮聊天输入框，不会自动发给模型。可以继续截图，等图片齐了再输入问题并发送。看图需要选用支持图片输入的模型。
+
 <div align="center">
 
 <img src="public/icon.png" width="120" height="120" alt="Kivio Desktop">
@@ -14,7 +20,7 @@
 
 **中文** · [English](README.en.md) · [更新日志](https://github.com/ZMGID/kivio/releases)
 
-[下载](https://github.com/ZMGID/kivio/releases/latest) · [功能](#功能) · [帮助](#帮助) · QQ 群 **1104450740**
+[下载悬浮版](https://github.com/JustJuicer/kivio/releases) · [下载上游原版](https://github.com/ZMGID/kivio/releases/latest) · [功能](#功能) · [帮助](#帮助) · 上游 QQ 群 **1104450740**
 
 <img src="docs/screenshots/qq-group.png" width="220" alt="Kivio QQ 群 1104450740">
 

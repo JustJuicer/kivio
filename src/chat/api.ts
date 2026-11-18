@@ -1,5 +1,6 @@
 // Chat API 调用封装
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { isPlaceholderTitle, optimisticConversationTitle } from './conversationTitle'
 import { estimateTokens } from '../utils/tokens'
 import { isTauriRuntime } from './utils'
@@ -2135,6 +2136,14 @@ export const chatApi = {
     if (!isTauriRuntime()) return null
     const id = await invoke<string | null>('chat_external_native_session_id', { conversationId })
     return id && id.trim() ? id : null
+  },
+
+  async setWindowPinned(pinned: boolean): Promise<void> {
+    if (isTauriRuntime()) await getCurrentWindow().setAlwaysOnTop(pinned)
+  },
+
+  async setFloatingMode(enabled: boolean): Promise<void> {
+    if (isTauriRuntime()) await invoke<void>('chat_set_floating_mode', { enabled })
   },
 
   async openConversationPopout(conversationId: string): Promise<void> {

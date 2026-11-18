@@ -6,6 +6,7 @@ import { api, type LensStreamPayload, type LensTranslateStreamPayload, type Lens
 import { getSettingsCached, setTranslateCardSizeCached } from './api/settingsCache'
 import { ChatMarkdown } from './chat/ChatMarkdown'
 import { Button } from './components/Button'
+import { notifyError } from './components/appNoticeStore'
 import { i18n, type Lang } from './components/i18n'
 import { isWebSearchConfigured } from './settings/webSearch'
 import { copyToClipboard } from './utils/clipboard'
@@ -186,6 +187,7 @@ export default function Lens() {
     closeOpening,
     closeAfterFeedback,
     currentToken,
+    isOpeningCurrent,
     captureReady,
     consumeFreezeFrame,
     finishCapture,
@@ -1241,6 +1243,23 @@ export default function Lens() {
     }
   }, [acceptsRequestEvent, applyTranslationPayload, finishRequestEvent])
 
+  // Native handoff owns both enqueue and window switching. Do not close Lens a
+  // second time (or wait for a background-window paint after the switch).
+  const openCapturedChat = async (imageId: string) => {
+    const opening = currentToken().open
+    try {
+      await closeOpening({
+        prepareHiddenSurface: concealBeforeHide,
+        commitHiddenSurface: resetAfterHide,
+        rollbackHiddenSurface: revealAfterFailedHide,
+        waitForPaint: () => Promise.resolve(),
+        hide: () => api.lensOpenFloatingChat(imageId),
+      })
+    } catch (error) {
+      if (isOpeningCurrent(opening)) notifyError(`${t.lensError}: ${String(error)}`)
+    }
+  }
+
   const handleCaptureWindow = async (info: LensWindowInfo) => {
     const captureToken = beginCapture()
     if (!captureToken) return
@@ -1253,6 +1272,7 @@ export default function Lens() {
         return
       }
       const newId = result.imageId
+      if (mode === 'chat') return await openCapturedChat(newId)
       captureImage(newId)
 
       // 记录截图框（webview 内坐标）作为已截视觉标记，截完保留显示
@@ -1312,8 +1332,9 @@ export default function Lens() {
         return
       }
       const newId = result.imageId
-      captureImage(newId)
       consumeFreezeFrame()
+      if (mode === 'chat') return await openCapturedChat(newId)
+      captureImage(newId)
       // 不清 freezeFramePreview：截图后仍把冻结帧作为全屏背景保留，直到按 Esc 关闭 Lens
       // （enterSelect / resetAfterHide 会在重开 / 隐藏时清理）。
 

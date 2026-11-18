@@ -143,6 +143,22 @@ impl LensRuntimeState {
 
     pub(crate) fn close_session_and_take_current(&self) -> Option<(String, PathBuf)> {
         let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+        Self::finish_session(&mut lifecycle)
+    }
+
+    /// A delayed renderer handoff must never finish the next Lens opening.
+    pub(crate) fn close_captured_session(
+        &self,
+        image_id: &str,
+    ) -> Result<(String, PathBuf), String> {
+        let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
+        if !lifecycle.session.busy || lifecycle.current_id.as_deref() != Some(image_id) {
+            return Err("Lens capture is no longer current".into());
+        }
+        Self::finish_session(&mut lifecycle).ok_or_else(|| "Missing Lens capture".into())
+    }
+
+    fn finish_session(lifecycle: &mut LensLifecycleState) -> Option<(String, PathBuf)> {
         lifecycle.session.busy = false;
         let image_id = lifecycle.current_id.take()?;
         lifecycle
@@ -639,6 +655,25 @@ mod runtime_state_tests {
             Ok(None)
         );
         assert_eq!(state.current_image_id().as_deref(), Some("current"));
+    }
+
+    #[test]
+    fn delayed_handoff_cannot_close_a_reopened_session() {
+        let state = LensRuntimeState::default();
+        let first = state.begin_session(false).unwrap();
+        let path = PathBuf::from("capture.png");
+        state
+            .register_current_image(first, "first".into(), path.clone())
+            .unwrap();
+        assert_eq!(state.close_captured_session("first").unwrap().1, path);
+        let next = state.begin_session(false).unwrap();
+        state
+            .register_current_image(next, "next".into(), path.clone())
+            .unwrap();
+        assert!(state.close_captured_session("first").is_err());
+        assert_eq!(state.current_image_id().as_deref(), Some("next"));
+        assert_eq!(state.begin_session(true), Err(LensSessionBusy));
+        assert_eq!(state.close_captured_session("next").unwrap().1, path);
     }
 
     #[test]

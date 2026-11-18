@@ -1,0 +1,6 @@
+{
+  "identifier": "chat-pin",
+  "description": "Only the main chat renderer may change its pin state",
+  "windows": ["chat"],
+  "permissions": ["core:window:allow-set-always-on-top"]
+}

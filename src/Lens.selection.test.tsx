@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   compose: vi.fn(),
   copyImage: vi.fn(),
   close: vi.fn(),
+  openFloating: vi.fn(),
 }))
 
 vi.mock('./lens/annotation', async importOriginal => ({
@@ -33,6 +34,7 @@ vi.mock('./api/tauri', () => ({
       if (key === 'explainReadImage') return mocks.readBase64
       if (key === 'lensCaptureRegion') return mocks.capture
       if (key === 'lensCopyImageToClipboard') return mocks.copyImage
+      if (key === 'lensOpenFloatingChat') return mocks.openFloating
       if (key === 'lensClose') return mocks.close
       if (key === 'lensListWindows') return async () => []
       if (key === 'takeLensSelection') return async () => ''
@@ -96,6 +98,22 @@ describe('Lens selection during cold initialization', () => {
       expect(mocks.close).not.toHaveBeenCalled()
       expect(container.firstElementChild?.getAttribute('aria-hidden')).not.toBe('true')
     }
+  })
+
+  it('hands a chat crop straight to the floating composer without reading a preview', async () => {
+    window.location.hash = '#lens?mode=chat'
+    mocks.takeReset.mockResolvedValue(JSON.stringify({ frame: { x: 0, y: 0, width: 1280, height: 800 } }))
+    mocks.capture.mockResolvedValue({ success: true, imageId: 'chat-crop' })
+    mocks.openFloating.mockResolvedValue(undefined)
+    const { container } = render(<Lens />)
+    await act(async () => {})
+    const root = container.firstElementChild!
+    fireEvent.mouseDown(root, { clientX: 100, clientY: 100 })
+    fireEvent.mouseMove(root, { clientX: 200, clientY: 180 })
+    await act(async () => { fireEvent.mouseUp(root, { clientX: 200, clientY: 180 }) })
+    await waitFor(() => expect(mocks.openFloating).toHaveBeenCalledWith('chat-crop'))
+    expect(mocks.readImage).not.toHaveBeenCalled()
+    expect(root.getAttribute('aria-hidden')).toBe('true')
   })
 
   // Cover each resolution and DPI once; retain the 2560px / 150% rounding regression.

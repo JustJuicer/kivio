@@ -7,7 +7,7 @@ import { i18n } from './components/i18n'
 const mocks = vi.hoisted(() => ({
   capture: vi.fn(), readImage: vi.fn(), close: vi.fn(), takeSelection: vi.fn(),
   dialog: vi.fn(), saveImage: vi.fn(), ask: vi.fn(), commitImage: vi.fn(),
-  streamListener: vi.fn(), handoff: vi.fn(), outerPosition: vi.fn(),
+  openFloating: vi.fn(), streamListener: vi.fn(), handoff: vi.fn(), outerPosition: vi.fn(),
   resetPayload: JSON.stringify({ frame: { x: 0, y: 0, width: 1280, height: 800 } }),
   sendToChatEnabled: false,
 }))
@@ -33,6 +33,7 @@ vi.mock('./api/tauri', () => ({
       if (key === 'lensListWindows') return async () => []
       if (key === 'lensCaptureRegion') return mocks.capture
       if (key === 'lensReadImage') return mocks.readImage
+      if (key === 'lensOpenFloatingChat') return mocks.openFloating
       if (key === 'lensClose') return mocks.close
       if (key === 'takeLensSelection') return mocks.takeSelection
       if (key === 'lensSaveAnnotatedPng') return mocks.saveImage
@@ -79,6 +80,7 @@ describe('Lens content lifecycle', () => {
     mocks.saveImage.mockReset().mockResolvedValue({ success: true })
     mocks.ask.mockReset()
     mocks.handoff.mockReset()
+    mocks.openFloating.mockReset().mockResolvedValue(undefined)
     mocks.sendToChatEnabled = false
     mocks.commitImage.mockReset().mockResolvedValue(undefined)
     mocks.streamListener.mockReset().mockResolvedValue(() => {})
@@ -87,25 +89,21 @@ describe('Lens content lifecycle', () => {
   })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-  it('keeps the captured surface usable when handoff succeeds but native close rejects', async () => {
+  it('keeps selection usable if opening the floating composer fails, and can retry without sending', async () => {
     window.location.hash = '#lens?mode=chat'
-    mocks.sendToChatEnabled = true
-    mocks.handoff.mockResolvedValue({ success: true })
-    mocks.close.mockRejectedValue(new Error('OS hide failed'))
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    mocks.openFloating.mockRejectedValueOnce(new Error('Cannot open chat'))
     const { container } = render(<Lens />)
     await act(async () => {})
     await capture(container)
-    await waitFor(() => expect(container.querySelector('img[alt="snap"]')).not.toBeNull())
-    fireEvent.change(container.querySelector('input')!, { target: { value: 'question' } })
-    await act(async () => { fireEvent.keyDown(container.querySelector('input')!, { key: 'Enter' }) })
-    await waitFor(() => expect(mocks.handoff).toHaveBeenCalledWith('cropped', 'question'))
-    await waitFor(() => expect(mocks.close).toHaveBeenCalledOnce())
-    await waitFor(() => expect(container.querySelector('img[alt="snap"]')).not.toBeNull())
+    expect(mocks.openFloating).toHaveBeenCalledWith('cropped')
     expect(container.firstElementChild?.getAttribute('aria-hidden')).not.toBe('true')
-    expect(container.querySelector('input')).not.toBeNull()
+    await capture(container)
+    expect(mocks.openFloating).toHaveBeenCalledTimes(2)
+    expect(container.firstElementChild?.getAttribute('aria-hidden')).toBe('true')
+    expect(mocks.ask).not.toHaveBeenCalled()
+    expect(mocks.handoff).not.toHaveBeenCalled()
+    expect(mocks.close).not.toHaveBeenCalled()
   })
-
   it('recovers a cold selection after native hide fails without losing its draft or accepting stale geometry', async () => {
     window.location.hash = '#lens?mode=chat'
     mocks.resetPayload = '{}'
@@ -129,7 +127,7 @@ describe('Lens content lifecycle', () => {
     await capture(container)
     await waitFor(() => expect(mocks.capture).toHaveBeenCalledOnce())
     expect(mocks.capture.mock.calls[0][0]).toMatchObject({ absoluteX: 120, absoluteY: 130 })
-    expect(container.querySelector('input')?.value).toBe('keep this draft')
+    expect(mocks.openFloating).toHaveBeenCalledWith('cropped')
     expect(mocks.ask).not.toHaveBeenCalled()
     expect(mocks.handoff).not.toHaveBeenCalled()
   })
@@ -224,9 +222,13 @@ describe('Lens content lifecycle', () => {
     mocks.commitImage.mockReturnValue(imageCommit.promise)
     let stream!: (payload: LensStreamPayload) => void
     mocks.streamListener.mockImplementation(async listener => { stream = listener; return () => {} })
+    // New crops now go straight to chat; existing image histories still support Lens follow-ups.
+    localStorage.setItem('kivio:lens-history:v1', JSON.stringify([{ id: 'cropped', imagePreview: 'thumbnail',
+      appLabel: 'Saved image', messages: [], capturedFrame: null, timestamp: 1 }]))
     const { container } = render(<Lens />)
     await act(async () => {})
-    await capture(container)
+    fireEvent.click(within(container).getByTitle(i18n.zh.lensHistory))
+    await act(async () => { fireEvent.click(within(container).getByText(/Saved image/)) })
     fireEvent.change(container.querySelector('input')!, { target: { value: 'question' } })
     await act(async () => { fireEvent.keyDown(container.querySelector('input')!, { key: 'Enter' }) })
     expect(mocks.ask).toHaveBeenCalledOnce()
