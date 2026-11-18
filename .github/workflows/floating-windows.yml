@@ -33,6 +33,10 @@ jobs:
           $files = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
           if ($files.Count -ne 1) { throw "Expected one x64 NSIS installer" }
           $file = $files[0]
+          # Release uploads normalize spaces to dots. Hash the published filename.
+          if ($file.Name.Contains(' ')) {
+            $file = Rename-Item -LiteralPath $file.FullName -NewName ($file.Name.Replace(' ', '.')) -PassThru
+          }
           $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($file.Name)" | Set-Content "$($file.DirectoryName)/SHA256SUMS.txt" -Encoding ascii
       - name: Test a clean install on the disposable Windows runner
