@@ -100,8 +100,8 @@ describe('Lens selection during cold initialization', () => {
     }
   })
 
-  it('hands a chat crop straight to the floating composer without reading a preview', async () => {
-    window.location.hash = '#lens?mode=chat'
+  it('hands an explicitly requested floating capture to the floating composer without reading a preview', async () => {
+    window.location.hash = '#lens?mode=floatingCapture'
     mocks.takeReset.mockResolvedValue(JSON.stringify({ frame: { x: 0, y: 0, width: 1280, height: 800 } }))
     mocks.capture.mockResolvedValue({ success: true, imageId: 'chat-crop' })
     mocks.openFloating.mockResolvedValue(undefined)
@@ -117,7 +117,7 @@ describe('Lens selection during cold initialization', () => {
   })
 
   it('can retry the same crop when opening chat fails without capturing or sending again', async () => {
-    window.location.hash = '#lens?mode=chat'
+    window.location.hash = '#lens?mode=floatingCapture'
     mocks.takeReset.mockResolvedValue(JSON.stringify({ frame: { x: 0, y: 0, width: 1280, height: 800 } }))
     mocks.capture.mockResolvedValue({ success: true, imageId: 'retained' })
     mocks.openFloating.mockReset().mockRejectedValueOnce(new Error('cannot open chat')).mockResolvedValue(undefined)

@@ -11,6 +11,7 @@ export type HotkeyScopeKey =
   | 'screenshotTranslationReplace'
   | 'screenshotAnnotate'
   | 'lens'
+  | 'floatingChat'
 
 function withHotkey(settings: Settings, target: HotkeyScopeKey, hotkey: string): Settings {
   switch (target) {
@@ -25,6 +26,7 @@ function withHotkey(settings: Settings, target: HotkeyScopeKey, hotkey: string):
       return { ...settings, screenshotTranslation: { ...settings.screenshotTranslation, replaceHotkey: hotkey } }
     case 'screenshotAnnotate':
       return { ...settings, screenshotAnnotate: { ...settings.screenshotAnnotate, hotkey } }
+    case 'floatingChat': return { ...settings, floatingChatHotkey: hotkey }
     case 'lens': return { ...settings, lens: { ...settings.lens, hotkey } }
   }
 }

@@ -1,9 +1,8 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../api/tauri'
 import { chatApi } from './api'
 import Chat from './Chat'
-import { getRememberedChatGeometry, rememberChatGeometry } from './persistence'
 
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onFocusChanged: async () => () => {} }) }))
 vi.mock('@xterm/xterm', () => ({ Terminal: class {} }))
@@ -28,73 +27,14 @@ function openChat(onContentReady?: () => void) {
   return render(<Chat onSettingsChange={() => {}} onContentReady={onContentReady} />)
 }
 
-it('accepts repeated capture intents and switches chats from the compact conversation list', async () => {
-  const geometry = vi.spyOn(chatApi, 'setFloatingMode').mockResolvedValue(undefined)
-  openChat()
-  await act(async () => {
-    window.dispatchEvent(new Event('kivio:enter-floating-chat'))
-    window.dispatchEvent(new Event('kivio:enter-floating-chat'))
-  })
-  fireEvent.click(await screen.findByRole('button', { name: '会话列表' }))
-  const list = await screen.findByRole('dialog')
-  fireEvent.click(await within(list).findByRole('button', { name: 'Result review' }))
-  expect(await screen.findByText('Earlier question', {}, { timeout: 8000 })).toBeInTheDocument()
-  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: '新建聊天' }))
-  expect(await screen.findByRole('button', { name: '恢复主界面' })).toBeInTheDocument()
-  expect(screen.queryByText('Earlier question')).not.toBeInTheDocument()
-  expect(geometry.mock.calls).toEqual([[true]])
-})
-
-it('shows only confirmed window pin state and keeps restore available after a native failure', async () => {
-  const geometry = vi.spyOn(chatApi, 'setFloatingMode').mockResolvedValue(undefined)
-  openChat()
-  fireEvent.click(await screen.findByRole('button', { name: '悬浮聊天' }))
-  const pin = await screen.findByRole('button', { name: '窗口置顶' })
-  const nativePin = vi.spyOn(chatApi, 'setWindowPinned').mockRejectedValueOnce(new Error('denied')).mockResolvedValue(undefined)
-  await act(async () => { fireEvent.click(pin) })
-  expect(pin).toHaveAttribute('aria-pressed', 'false')
-  await act(async () => { fireEvent.click(pin) })
-  expect(pin).toHaveAttribute('aria-pressed', 'true')
-  await act(async () => { fireEvent.click(pin) })
-  expect(nativePin.mock.calls).toEqual([[true], [true], [false]])
-  geometry.mockRejectedValueOnce(new Error('restore failed'))
-  const restore = screen.getByRole('button', { name: '恢复主界面' })
-  await act(async () => { fireEvent.click(restore) })
-  expect(restore).toBeEnabled()
-  await act(async () => { fireEvent.click(restore) })
-  expect(screen.getByRole('button', { name: '悬浮聊天' })).toBeInTheDocument()
-})
-
-it('waits for cold-window placement and keeps compact moves out of the normal restore geometry', async () => {
-  const normal = { x: 40, y: 60, width: 1100, height: 700 }
-  const compact = { x: 200, y: 300, width: 480, height: 480 }
-  rememberChatGeometry(normal)
-  const geometry = vi.spyOn(chatApi, 'setFloatingMode').mockResolvedValue(undefined)
-  let shown!: () => void
-  const reveal = new Promise<void>(resolve => { shown = resolve })
-  openChat(() => reveal)
-  await act(async () => { window.dispatchEvent(new Event('kivio:enter-floating-chat')) })
-  expect(geometry).not.toHaveBeenCalled()
-  await act(async () => { shown() })
-  const restore = await screen.findByRole('button', { name: '恢复主界面' })
-  rememberChatGeometry(compact)
-  expect(getRememberedChatGeometry()).toEqual(normal)
-  await act(async () => { fireEvent.click(restore) })
-  rememberChatGeometry({ ...normal, x: 88 })
-  expect(getRememberedChatGeometry()).toEqual({ ...normal, x: 88 })
-})
-
-it('switches the existing chat composer into a compact window and back without replacing it', async () => {
+it('opens a separate window without replacing the main composer or route', async () => {
+  const toggle = vi.spyOn(chatApi, 'toggleFloatingWindow').mockResolvedValue()
   openChat()
   const entry = await screen.findByRole('button', { name: '悬浮聊天' })
-  const composer = document.querySelector('[contenteditable="true"], textarea')
-  expect(composer).not.toBeNull()
+  const editor = document.querySelector('[contenteditable="true"]')
   fireEvent.click(entry)
-  const restore = await screen.findByRole('button', { name: '恢复主界面' })
-  expect(screen.queryByRole('button', { name: '展开侧栏' })).not.toBeInTheDocument()
-  expect(composer).toBeInTheDocument()
-  fireEvent.click(restore)
-  expect(await screen.findByRole('button', { name: '悬浮聊天' })).toBeInTheDocument()
-  expect(composer).toBeInTheDocument()
+  expect(toggle).toHaveBeenCalledTimes(1)
+  expect(editor).toBeInTheDocument()
+  expect(window.location.hash).toBe('#chat')
+  expect(screen.queryByRole('button', { name: '会话列表' })).not.toBeInTheDocument()
 })

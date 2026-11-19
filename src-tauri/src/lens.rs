@@ -31,6 +31,7 @@ pub(crate) struct LensRuntimeState {
 #[derive(Debug, Default)]
 struct LensSessionState {
     busy: bool,
+    floating_capture: bool,
     open_seq: u64,
     opened_at: Option<Instant>,
 }
@@ -117,7 +118,11 @@ impl LensRuntimeState {
     /// Acquire the single Lens session slot, repairing a stale busy marker only when no overlay
     /// is visible and the just-opened grace period has elapsed. On success this also advances the
     /// watchdog sequence and starts a new grace period as one transition.
-    pub(crate) fn begin_session(&self, overlay_visible: bool) -> Result<u64, LensSessionBusy> {
+    pub(crate) fn begin_session(
+        &self,
+        overlay_visible: bool,
+        floating_capture: bool,
+    ) -> Result<u64, LensSessionBusy> {
         let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
         let session = &mut lifecycle.session;
         if session.busy && !overlay_visible && !Self::open_in_grace(&session) {
@@ -128,6 +133,7 @@ impl LensRuntimeState {
         }
 
         session.busy = true;
+        session.floating_capture = floating_capture;
         session.open_seq = session.open_seq.wrapping_add(1);
         session.opened_at = Some(Instant::now());
         Ok(session.open_seq)
@@ -152,7 +158,10 @@ impl LensRuntimeState {
         image_id: &str,
     ) -> Result<(String, PathBuf), String> {
         let mut lifecycle = self.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
-        if !lifecycle.session.busy || lifecycle.current_id.as_deref() != Some(image_id) {
+        if !lifecycle.session.busy
+            || !lifecycle.session.floating_capture
+            || lifecycle.current_id.as_deref() != Some(image_id)
+        {
             return Err("Lens capture is no longer current".into());
         }
         Self::finish_session(&mut lifecycle).ok_or_else(|| "Missing Lens capture".into())
@@ -508,33 +517,33 @@ mod runtime_state_tests {
     #[test]
     fn session_busy_recovers_only_after_open_grace_expires() {
         let state = LensRuntimeState::default();
-        assert_eq!(state.begin_session(false), Ok(1));
-        assert_eq!(state.begin_session(false), Err(LensSessionBusy));
+        assert_eq!(state.begin_session(false, false), Ok(1));
+        assert_eq!(state.begin_session(false, false), Err(LensSessionBusy));
 
         expire_open_grace(&state);
-        assert_eq!(state.begin_session(false), Ok(2));
+        assert_eq!(state.begin_session(false, false), Ok(2));
     }
 
     #[test]
     fn visible_session_stays_busy_even_after_open_grace_expires() {
         let state = LensRuntimeState::default();
-        assert_eq!(state.begin_session(false), Ok(1));
+        assert_eq!(state.begin_session(false, false), Ok(1));
         expire_open_grace(&state);
 
-        assert_eq!(state.begin_session(true), Err(LensSessionBusy));
+        assert_eq!(state.begin_session(true, false), Err(LensSessionBusy));
         assert!(state.is_session_current(1));
     }
 
     #[test]
     fn active_probe_preserves_opening_session_and_repairs_stale_busy() {
         let state = LensRuntimeState::default();
-        assert_eq!(state.begin_session(false), Ok(1));
+        assert_eq!(state.begin_session(false, false), Ok(1));
         assert!(!state.is_active_or_recover(|| false));
-        assert_eq!(state.begin_session(false), Err(LensSessionBusy));
+        assert_eq!(state.begin_session(false, false), Err(LensSessionBusy));
 
         expire_open_grace(&state);
         assert!(!state.is_active_or_recover(|| false));
-        assert_eq!(state.begin_session(false), Ok(2));
+        assert_eq!(state.begin_session(false, false), Ok(2));
         assert!(state.is_active_or_recover(|| true));
     }
 
@@ -580,7 +589,7 @@ mod runtime_state_tests {
         let state = LensRuntimeState::default();
         let first_path = PathBuf::from("first.png");
         let second_path = PathBuf::from("second.png");
-        assert_eq!(state.begin_session(false), Ok(1));
+        assert_eq!(state.begin_session(false, false), Ok(1));
 
         assert_eq!(
             state.register_current_image(1, "first".to_string(), first_path.clone()),
@@ -607,7 +616,7 @@ mod runtime_state_tests {
     #[test]
     fn close_atomically_rejects_a_late_capture_and_removes_the_current_image() {
         let state = LensRuntimeState::default();
-        assert_eq!(state.begin_session(false), Ok(1));
+        assert_eq!(state.begin_session(false, false), Ok(1));
         assert_eq!(
             state.register_current_image(1, "current".to_string(), PathBuf::from("current.png")),
             Ok(None)
@@ -630,9 +639,9 @@ mod runtime_state_tests {
     #[test]
     fn reopening_rejects_a_capture_from_the_previous_session() {
         let state = LensRuntimeState::default();
-        let stale_session = state.begin_session(false).expect("first session");
+        let stale_session = state.begin_session(false, false).expect("first session");
         assert_eq!(state.close_session_and_take_current(), None);
-        let current_session = state.begin_session(false).expect("reopened session");
+        let current_session = state.begin_session(false, false).expect("reopened session");
         assert_ne!(stale_session, current_session);
 
         assert_eq!(
@@ -658,21 +667,32 @@ mod runtime_state_tests {
     }
 
     #[test]
+    fn ordinary_lens_capture_cannot_be_handed_to_floating_chat() {
+        let state = LensRuntimeState::default();
+        let seq = state.begin_session(false, false).unwrap();
+        state
+            .register_current_image(seq, "ordinary".into(), "ordinary.png".into())
+            .unwrap();
+        assert!(state.close_captured_session("ordinary").is_err());
+        assert_eq!(state.current_image_id().as_deref(), Some("ordinary"));
+    }
+
+    #[test]
     fn delayed_handoff_cannot_close_a_reopened_session() {
         let state = LensRuntimeState::default();
-        let first = state.begin_session(false).unwrap();
+        let first = state.begin_session(false, true).unwrap();
         let path = PathBuf::from("capture.png");
         state
             .register_current_image(first, "first".into(), path.clone())
             .unwrap();
         assert_eq!(state.close_captured_session("first").unwrap().1, path);
-        let next = state.begin_session(false).unwrap();
+        let next = state.begin_session(false, true).unwrap();
         state
             .register_current_image(next, "next".into(), path.clone())
             .unwrap();
         assert!(state.close_captured_session("first").is_err());
         assert_eq!(state.current_image_id().as_deref(), Some("next"));
-        assert_eq!(state.begin_session(true), Err(LensSessionBusy));
+        assert_eq!(state.begin_session(true, false), Err(LensSessionBusy));
         assert_eq!(state.close_captured_session("next").unwrap().1, path);
     }
 
@@ -687,7 +707,7 @@ mod runtime_state_tests {
                 let start = Arc::clone(&start);
                 std::thread::spawn(move || {
                     start.wait();
-                    state.begin_session(false)
+                    state.begin_session(false, false)
                 })
             })
             .collect::<Vec<_>>();
@@ -699,6 +719,6 @@ mod runtime_state_tests {
         assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
         assert_eq!(state.session_seq(), 1);
         assert!(!state.is_active_or_recover(|| false));
-        assert_eq!(state.begin_session(false), Err(LensSessionBusy));
+        assert_eq!(state.begin_session(false, false), Err(LensSessionBusy));
     }
 }

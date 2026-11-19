@@ -90,7 +90,7 @@ use windows::{ensure_overlay_panel, restore_previous_frontmost_app};
 const AUTOSTART_ARG: &str = "--from-autostart";
 
 #[cfg(target_os = "macos")]
-const USER_WINDOW_LABELS: &[&str] = &["chat", "translator"];
+const USER_WINDOW_LABELS: &[&str] = &["chat", windows::floating::LABEL, "translator"];
 
 #[cfg(target_os = "macos")]
 fn first_visible_user_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
@@ -210,6 +210,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(autostart_plugin)
         .on_page_load(|webview, payload| {
+            if webview.label() == windows::floating::LABEL && payload.event() == tauri::webview::PageLoadEvent::Started {
+                chat::popout::replace_floating_claim(webview.app_handle(), None);
+            }
             if webview.label() == "chat" && payload.event() == tauri::webview::PageLoadEvent::Started {
                 if let Some(voice) = webview.app_handle().try_state::<voice_codex::VoiceCodexService>() {
                     voice.cancel();
@@ -218,9 +221,13 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                if window.label() == "chat" {
-                    #[cfg(target_os = "windows")]
+                if window.label() == windows::floating::LABEL {
+                    api.prevent_close();
                     windows::floating::clear_capture_hide(window.app_handle());
+                    let _ = window.hide();
+                    return;
+                }
+                if window.label() == "chat" {
                     let keep_alive = window
                         .app_handle()
                         .state::<AppState>()
@@ -289,8 +296,10 @@ pub fn run() {
                 chat::notification_viewing::clear_window(label);
                 if crate::chat::popout::is_popout_label(label) {
                     crate::chat::popout::on_popout_destroyed(window.app_handle(), label);
+                } else if label == windows::floating::LABEL {
+                    windows::floating::clear_capture_hide(window.app_handle());
+                    chat::popout::replace_floating_claim(window.app_handle(), None);
                 } else if label == "chat" {
-                    windows::floating::forget_window(window.app_handle());
                     window.app_handle().state::<voice_codex::VoiceCodexService>().cancel();
                     crate::chat::protocol::unsubscribe_label(
                         &window.app_handle().state::<AppState>(),
@@ -607,7 +616,9 @@ pub fn run() {
             lens_commands::lens_capture_region,
             lens_commands::lens_open_floating_chat,
             windows::floating::chat_take_floating_captures,
-            windows::floating::chat_set_floating_mode,
+            windows::floating::ipc::toggle_floating_chat_window,
+            lens_commands::floating_chat_capture,
+            chat::popout::floating_chat_claim_conversation,
             lens_commands::lens_register_annotated_image,
             lens_commands::lens_copy_image_to_clipboard,
             lens_commands::lens_save_annotated_png,

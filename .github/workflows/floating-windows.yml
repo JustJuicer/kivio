@@ -48,9 +48,14 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Installer exited $($p.ExitCode)" }
           $binary = Join-Path $dest 'kivio.exe'
           if (!(Test-Path $binary -PathType Leaf)) { throw "Missing installed executable: $binary" }
-          $p = Start-Process $binary -PassThru
-          if ($p.WaitForExit(10000)) { throw "Kivio exited at startup: $($p.ExitCode)" }
-          Stop-Process -Id $p.Id
+          $p = Start-Process $binary -ArgumentList '--from-autostart' -PassThru
+          try {
+            if ($p.WaitForExit(10000)) { throw "Kivio exited at startup: $($p.ExitCode)" }
+            python scripts/test-windows-floating-hotkey.py $p.Id
+            if ($LASTEXITCODE -ne 0) { throw 'Floating shortcut failed from tray startup' }
+          } finally {
+            if (!$p.HasExited) { Stop-Process -Id $p.Id }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: Kivio-floating-chat-windows-x64
@@ -79,5 +84,5 @@ jobs:
           sha256sum --check SHA256SUMS.txt
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Kivio 悬浮对话 · $TAG (Windows x64)" \
-            --notes '下载下方的 setup.exe。先退出托盘中的 Kivio，并备份 %APPDATA%\com.zmair.kivio。沿用原版的模型设置和聊天历史。默认 Ctrl+Shift+G 框选，再次截图追加到同一输入框。' \
+            --notes '下载下方的 setup.exe。先退出托盘中的 Kivio，并备份 %APPDATA%\com.zmair.kivio。悬浮小窗有独立全局快捷键（默认 Ctrl+Shift+J，可在设置里更改），再按一次收起。Ctrl+Shift+G 保留给原来的 Lens；在小窗中用截图按钮添加图片。' \
             ./*-setup.exe SHA256SUMS.txt

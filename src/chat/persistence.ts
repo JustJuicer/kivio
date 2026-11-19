@@ -476,25 +476,12 @@ export function getRememberedChatGeometry(): ChatWindowGeometry {
   return CHAT_DEFAULT_SIZE
 }
 
-// Native move/resize events also fire while entering, moving and leaving compact mode.
-// Invalidate reads already in flight; they must not commit after a later restore.
-let geometryGeneration = 0
-let geometryHolds = 0
-export function suspendNormalChatGeometry() {
-  geometryGeneration++
-  geometryHolds++
-  return () => { geometryHolds-- }
-}
-
 export async function persistNormalChatGeometry(win: Window) {
-  if (geometryHolds) return
-  const generation = geometryGeneration
   const geometry = await snapshotChatWindowGeometry(win)
-  if (geometry && generation === geometryGeneration) rememberChatGeometry(geometry)
+  if (geometry) rememberChatGeometry(geometry)
 }
 
 export function rememberChatGeometry(geometry: ChatWindowGeometry) {
-  if (geometryHolds) return
   const normalized = normalizeChatWindowGeometry(geometry)
   if (!normalized) return
   setLocalStorageItem(CHAT_WINDOW_GEOMETRY_KEY, JSON.stringify(normalized))

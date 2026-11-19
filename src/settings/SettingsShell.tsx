@@ -308,6 +308,7 @@ export const SettingsShell = forwardRef<SettingsShellHandle, SettingsShellProps>
       },
       { scope: 'screenshotAnnotate', hotkey: settings.screenshotAnnotate.hotkey, enabled: settings.screenshotAnnotate.enabled },
       { scope: 'lens', hotkey: settings.lens.hotkey, enabled: settings.lens.enabled },
+      { scope: 'floatingChat', hotkey: settings.floatingChatHotkey || '', enabled: true },
     ]
     const groups = new Map<string, HotkeyScopeKey[]>()
     for (const s of slots) {
@@ -328,7 +329,7 @@ export const SettingsShell = forwardRef<SettingsShellHandle, SettingsShellProps>
     return out
   }, [settings])
 
-  const SCOPE_I18N_KEY: Record<HotkeyScopeKey, 'hotkeyScopeTranslator' | 'hotkeyScopeChat' | 'hotkeyScopeCloseChat' | 'hotkeyScopeScreenshot' | 'hotkeyScopeScreenshotText' | 'hotkeyScopeScreenshotReplace' | 'annotateHotkeyLabel' | 'hotkeyScopeLens'> = {
+  const SCOPE_I18N_KEY: Record<HotkeyScopeKey, 'hotkeyScopeTranslator' | 'hotkeyScopeChat' | 'hotkeyScopeCloseChat' | 'hotkeyScopeScreenshot' | 'hotkeyScopeScreenshotText' | 'hotkeyScopeScreenshotReplace' | 'annotateHotkeyLabel' | 'hotkeyScopeLens' | 'floatingChatHotkeyLabel'> = {
     main: 'hotkeyScopeTranslator',
     chat: 'hotkeyScopeChat',
     closeChat: 'hotkeyScopeCloseChat',
@@ -337,6 +338,7 @@ export const SettingsShell = forwardRef<SettingsShellHandle, SettingsShellProps>
     screenshotTranslationReplace: 'hotkeyScopeScreenshotReplace',
     screenshotAnnotate: 'annotateHotkeyLabel',
     lens: 'hotkeyScopeLens',
+    floatingChat: 'floatingChatHotkeyLabel',
   }
   const conflictMessageFor = (scope: HotkeyScopeKey): string | undefined => {
     const partner = hotkeyConflicts[scope]

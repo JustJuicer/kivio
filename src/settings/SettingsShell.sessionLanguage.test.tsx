@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { SettingsSnapshot } from '../api/tauri'
@@ -37,6 +37,24 @@ vi.mock('../api/tauri', async (importOriginal) => {
       onReplaceTranslationPackProgress: async () => () => {},
     },
   }
+})
+
+describe('SettingsShell floating chat shortcut', () => {
+  it('shows a Lens conflict in both rows and clears only the floating binding', async () => {
+    const user = userEvent.setup()
+    const t = i18n.zh
+    render(<SettingsShell variant="embedded" initialTab="hotkeys" hideNav onClose={vi.fn()} onSettingsChange={vi.fn()} renderReleaseNotes={() => null} />)
+    const floating = within((await screen.findByText(t.floatingChatHotkeyLabel)).closest<HTMLElement>('.kv-row')!)
+    const lens = within(screen.getByText(t.lensTabLabel).closest<HTMLElement>('.kv-row')!)
+    await user.click(floating.getByRole('button', { name: t.hotkeyRecord }))
+    await user.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    expect(floating.getByText(t.hotkeyConflictWith.replace('{partner}', t.hotkeyScopeLens))).toBeInTheDocument()
+    expect(lens.getByText(t.hotkeyConflictWith.replace('{partner}', t.floatingChatHotkeyLabel))).toBeInTheDocument()
+    await user.click(floating.getByRole('button', { name: t.hotkeyClear }))
+    expect(floating.queryByText('G')).toBeNull()
+    expect(lens.getByText('G')).toBeInTheDocument()
+    expect(lens.queryByText(t.hotkeyConflictWith.replace('{partner}', t.floatingChatHotkeyLabel))).toBeNull()
+  })
 })
 
 describe('SettingsShell session center language slot', () => {

@@ -89,8 +89,26 @@ describe('Lens content lifecycle', () => {
   })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+  it('leaves the normal Lens crop in place until the user asks to hand a question to Chat', async () => {
+    window.location.hash = '#lens'
+    mocks.sendToChatEnabled = true
+    mocks.handoff.mockResolvedValue({ success: true })
+    const { container } = render(<Lens />)
+    await act(async () => {})
+    await capture(container)
+    await waitFor(() => expect(container.querySelector('img[alt="snap"]')).not.toBeNull())
+    expect(mocks.handoff).not.toHaveBeenCalled()
+    expect(mocks.openFloating).not.toHaveBeenCalled()
+    const input = container.querySelector('input')!
+    fireEvent.change(input, { target: { value: 'question' } })
+    await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }) })
+    await waitFor(() => expect(mocks.handoff).toHaveBeenCalledWith('cropped', 'question'))
+    await waitFor(() => expect(mocks.close).toHaveBeenCalledOnce())
+    expect(mocks.openFloating).not.toHaveBeenCalled()
+  })
+
   it('keeps selection usable if opening the floating composer fails, and can retry without sending', async () => {
-    window.location.hash = '#lens?mode=chat'
+    window.location.hash = '#lens?mode=floatingCapture'
     mocks.openFloating.mockRejectedValueOnce(new Error('Cannot open chat'))
     const { container } = render(<Lens />)
     await act(async () => {})
@@ -127,7 +145,8 @@ describe('Lens content lifecycle', () => {
     await capture(container)
     await waitFor(() => expect(mocks.capture).toHaveBeenCalledOnce())
     expect(mocks.capture.mock.calls[0][0]).toMatchObject({ absoluteX: 120, absoluteY: 130 })
-    expect(mocks.openFloating).toHaveBeenCalledWith('cropped')
+    expect(mocks.openFloating).not.toHaveBeenCalled()
+    expect(container.querySelector('input')?.value).toBe('keep this draft')
     expect(mocks.ask).not.toHaveBeenCalled()
     expect(mocks.handoff).not.toHaveBeenCalled()
   })
@@ -222,13 +241,10 @@ describe('Lens content lifecycle', () => {
     mocks.commitImage.mockReturnValue(imageCommit.promise)
     let stream!: (payload: LensStreamPayload) => void
     mocks.streamListener.mockImplementation(async listener => { stream = listener; return () => {} })
-    // New crops now go straight to chat; existing image histories still support Lens follow-ups.
-    localStorage.setItem('kivio:lens-history:v1', JSON.stringify([{ id: 'cropped', imagePreview: 'thumbnail',
-      appLabel: 'Saved image', messages: [], capturedFrame: null, timestamp: 1 }]))
     const { container } = render(<Lens />)
     await act(async () => {})
-    fireEvent.click(within(container).getByTitle(i18n.zh.lensHistory))
-    await act(async () => { fireEvent.click(within(container).getByText(/Saved image/)) })
+    await capture(container)
+    expect(mocks.openFloating).not.toHaveBeenCalled()
     fireEvent.change(container.querySelector('input')!, { target: { value: 'question' } })
     await act(async () => { fireEvent.keyDown(container.querySelector('input')!, { key: 'Enter' }) })
     expect(mocks.ask).toHaveBeenCalledOnce()

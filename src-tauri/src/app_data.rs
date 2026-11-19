@@ -102,6 +102,7 @@ mod tests {
             &settings.hotkey,
             &settings.chat_hotkey,
             &settings.close_chat_hotkey,
+            &settings.floating_chat_hotkey,
             &settings.screenshot_translation.hotkey,
             &settings.screenshot_translation.text_hotkey,
             &settings.screenshot_translation.replace_hotkey,

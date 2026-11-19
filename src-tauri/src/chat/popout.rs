@@ -43,8 +43,65 @@ pub fn list_popout_conversation_ids(app: &AppHandle) -> Vec<String> {
         .into_iter()
         .filter_map(|(label, _)| conversation_id_from_label(&label).map(str::to_string))
         .collect();
+    ids.extend(floating_claim(app));
     ids.sort();
     ids
+}
+
+fn floating_claim(app: &AppHandle) -> Option<String> {
+    app.state::<windows::floating::FloatingChat>()
+        .conversation
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+// The floating label is stable while its selected conversation changes. A claim
+// is exclusive just like a conversation popout, and survives hiding its webview.
+#[tauri::command]
+pub(crate) async fn floating_chat_claim_conversation(
+    window: WebviewWindow,
+    conversation_id: Option<String>,
+) -> Result<(), String> {
+    if window.label() != windows::floating::LABEL {
+        return Err("Expected floating chat".into());
+    }
+    let app = window.app_handle();
+    let state = app.state::<AppState>();
+    let _guard = state.chat_runtime().lock_popout_creation().await;
+    if let Some(id) = conversation_id.as_deref() {
+        if !valid_popout_conversation_id(id) {
+            return Err("Invalid conversation id".into());
+        }
+        if app.get_webview_window(&popout_label(id)).is_some() {
+            return Err("Conversation already open in a separate window".into());
+        }
+    }
+    replace_floating_claim(app, conversation_id);
+    Ok(())
+}
+
+pub(crate) fn replace_floating_claim(app: &AppHandle, next: Option<String>) {
+    let floating = app.state::<windows::floating::FloatingChat>();
+    let mut claim = floating
+        .conversation
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if *claim == next {
+        return;
+    }
+    *claim = next;
+    protocol::unsubscribe_label(&app.state::<AppState>(), windows::floating::LABEL);
+    drop(claim);
+    emit_popouts_changed(app);
+}
+
+fn floating_owner(app: &AppHandle, id: &str) -> Option<WebviewWindow> {
+    if floating_claim(app).as_deref() == Some(id) {
+        app.get_webview_window(windows::floating::LABEL)
+    } else {
+        None
+    }
 }
 
 pub fn has_open_popouts(app: &AppHandle) -> bool {
@@ -92,6 +149,10 @@ pub fn sync_macos_activation_policy(app: &AppHandle) {
 }
 
 pub fn close_popout_for_conversation(app: &AppHandle, conversation_id: &str) {
+    if let Some(window) = floating_owner(app, conversation_id) {
+        let _ = window.destroy(); // explicit return/delete, not a visibility toggle
+        return;
+    }
     let label = popout_label(conversation_id);
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.destroy();
@@ -144,13 +205,21 @@ pub async fn chat_open_conversation_popout(
     }
     let state = app.state::<AppState>();
     let _create_guard = state.chat_runtime().lock_popout_creation().await;
+    if let Some(window) = floating_owner(&app, &conversation_id) {
+        return windows::floating::reveal(&window);
+    }
     let label = popout_label(&conversation_id);
     if let Some(window) = app.get_webview_window(&label) {
         reveal_popout(&app, &window);
         return Ok(());
     }
-    let open = list_popout_conversation_ids(&app);
-    if open.len() >= MAX_POPOUT_WINDOWS {
+    if app
+        .webview_windows()
+        .keys()
+        .filter(|label| is_popout_label(label))
+        .count()
+        >= MAX_POPOUT_WINDOWS
+    {
         return Err(format!("最多同时打开 {MAX_POPOUT_WINDOWS} 个独立对话窗口"));
     }
     let window = windows::ensure_chat_popout_window(&app, &label, &conversation_id)?;
@@ -171,6 +240,10 @@ pub async fn chat_focus_conversation_popout(
     app: AppHandle,
     conversation_id: String,
 ) -> Result<bool, String> {
+    if let Some(window) = floating_owner(&app, &conversation_id) {
+        windows::floating::reveal(&window)?;
+        return Ok(true);
+    }
     let Some(window) = app.get_webview_window(&popout_label(&conversation_id)) else {
         return Ok(false);
     };

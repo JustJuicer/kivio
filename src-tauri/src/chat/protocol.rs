@@ -2172,6 +2172,20 @@ pub fn chat_protocol_subscribe(
     channel: tauri::ipc::Channel<ChatProtocolEvent>,
     conversation_id: Option<String>,
 ) {
+    // Do not let a delayed subscription to the previous draft steal its token stream
+    // from the main window. Keep the claim locked through channel installation.
+    let floating = window.state::<crate::windows::floating::FloatingChat>();
+    let claim = (window.label() == crate::windows::floating::LABEL).then(|| {
+        floating
+            .conversation
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    });
+    if let Some(claim) = &claim {
+        if claim.is_none() || claim.as_deref() != conversation_id.as_deref() {
+            return;
+        }
+    }
     let filter = crate::chat::popout::protocol_filter_for_window(window.label(), conversation_id);
     state.chat_protocol().subscribers().insert(
         window.label().to_string(),

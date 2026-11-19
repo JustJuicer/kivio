@@ -38,8 +38,8 @@ import type { Lang } from '../../components/i18n'
 
 const EMPTY_MESSAGES: Conversation['messages'] = []
 
-export function usePopoutSession(conversationId: string, lang: Lang) {
-  const [conversation, setConversation] = useState<Conversation | null>(null)
+export function usePopoutSession(conversationId: string, lang: Lang, initialConversation?: Conversation) {
+  const [conversation, setConversation] = useState<Conversation | null>(initialConversation ?? null)
   // A queued React update is not yet a visible replacement for the live preview.
   const committedConversationRef = useRef(conversation)
   useLayoutEffect(() => { committedConversationRef.current = conversation }, [conversation])

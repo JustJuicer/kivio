@@ -2142,8 +2142,17 @@ export const chatApi = {
     if (isTauriRuntime()) await getCurrentWindow().setAlwaysOnTop(pinned)
   },
 
-  async setFloatingMode(enabled: boolean): Promise<void> {
-    if (isTauriRuntime()) await invoke<void>('chat_set_floating_mode', { enabled })
+  async toggleFloatingWindow(): Promise<void> {
+    if (isTauriRuntime()) await invoke<void>('toggle_floating_chat_window')
+    else window.open('#floating-chat', 'floating-chat', 'popup,width=480,height=480')
+  },
+
+  async captureForFloatingWindow(): Promise<void> {
+    if (isTauriRuntime()) await invoke<void>('floating_chat_capture')
+  },
+
+  async claimFloatingConversation(conversationId: string | null): Promise<void> {
+    if (isTauriRuntime()) await invoke<void>('floating_chat_claim_conversation', { conversationId })
   },
 
   async openConversationPopout(conversationId: string): Promise<void> {

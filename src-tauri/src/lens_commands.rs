@@ -528,10 +528,11 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
     // begin_session 原子地完成 stale-busy 自愈、单会话占用、watchdog 代号和开启宽限期。
     let opening_seq = state
         .lens()
-        .begin_session(active_overlay_window(app).is_some())
+        .begin_session(
+            active_overlay_window(app).is_some(),
+            mode == "floatingCapture",
+        )
         .map_err(|_| "Lens already active".to_string())?;
-    #[cfg(not(target_os = "windows"))]
-    let _ = opening_seq;
     cleanup_lens_freeze_frame(app);
     state.lens().cancel_stream();
 
@@ -552,9 +553,12 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
         return Ok(());
     }
 
-    #[cfg(target_os = "windows")]
-    if mode != "translateText" {
-        if let Err(error) = windows::floating::hide_for_capture(app, opening_seq) {
+    let hide_composer =
+        mode == "floatingCapture" || (cfg!(target_os = "windows") && mode != "translateText");
+    if hide_composer {
+        if let Err(error) =
+            windows::floating::hide_for_capture(app, opening_seq, mode == "floatingCapture")
+        {
             windows::floating::restore_after_capture(app, opening_seq);
             state.lens().release_session();
             return Err(error);
@@ -564,21 +568,26 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
     // 必须在 ensure_* 创建隐藏 WebView 之前记录。macOS 冷创建普通 NSWindow 可能短暂激活
     // Kivio；若等创建后才记录，就会把被抢来的 Kivio 误认成原前台 App，Chat 随之被排到最前。
     #[cfg(target_os = "macos")]
-    windows::remember_frontmost_app(state.frontmost_apps().lens());
+    if mode == "floatingCapture" {
+        // The return target is the composer, not the app now exposed by its temporary hide.
+        windows::forget_frontmost_app(state.frontmost_apps().lens());
+    } else {
+        windows::remember_frontmost_app(state.frontmost_apps().lens());
+    }
 
     // 按 mode 选目标窗口：chat → lens 问答窗口；translate / translateText → 独立快速翻译窗口。
     // 两者互斥（同一时刻只一个浮窗可见，由 lens_is_active 泛化 + 热键 toggle 保证）。
     // 先记下浮窗是否"已存在"（复用）：冷创建时前端会全新挂载、自行 take 复位载荷与选区，
     // 之后绝不能再发 lens:reset——否则 mount 的 enterSelect 与事件的 enterSelect 双跑,
     // take-once 的选中文本会被先取后作废丢弃（见前端 selectionReqIdRef 竞态）。
-    let target_label = if mode == "chat" || mode == "screenshot" {
+    let target_label = if matches!(mode, "chat" | "screenshot" | "floatingCapture") {
         "lens"
     } else {
         "translate"
     };
     let overlay_existed = app.get_webview_window(target_label).is_some();
     let window = {
-        let ensured = if mode == "chat" || mode == "screenshot" {
+        let ensured = if target_label == "lens" {
             windows::ensure_lens_window(app, mode)
         } else {
             windows::ensure_translate_window(app, mode)
@@ -587,7 +596,6 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
             Ok(w) => w,
             Err(e) => {
                 state.lens().release_session();
-                #[cfg(target_os = "windows")]
                 windows::floating::restore_after_capture(app, opening_seq);
                 #[cfg(target_os = "macos")]
                 windows::restore_previous_frontmost_app(app, state.frontmost_apps().lens());
@@ -595,8 +603,7 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
             }
         }
     };
-    #[cfg(target_os = "windows")]
-    if mode != "translateText" {
+    if hide_composer {
         // Also release the temporary hide on an unexpected native destruction. Capture
         // this opening's sequence: a late WM_DESTROY must not unhide the next opening.
         let handle = app.clone();
@@ -614,6 +621,7 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
         "translateText" => "translateText",
         "replace" => "replace",
         "screenshot" => "screenshot",
+        "floatingCapture" => "floatingCapture",
         _ => "chat",
     };
     let mut freeze_frame_image_id: Option<String> = None;
@@ -649,7 +657,6 @@ pub(crate) fn lens_request_internal(app: &AppHandle, mode: &str) -> Result<(), S
         if let Err(error) = window.show() {
             let _ = window.destroy();
             cleanup_lens_freeze_frame(app);
-            #[cfg(target_os = "windows")]
             windows::floating::restore_after_capture(app, opening_seq);
             state.lens().release_session();
             return Err(error.to_string());
@@ -1180,6 +1187,17 @@ pub(crate) async fn lens_ask(
     }
 }
 
+/// Only the quick composer can start a Lens session with a draft as its destination.
+#[tauri::command]
+pub(crate) async fn floating_chat_capture(window: WebviewWindow) -> Result<(), String> {
+    if window.label() != windows::floating::LABEL
+        || !window.is_visible().map_err(|e| e.to_string())?
+    {
+        return Err("Expected a visible floating chat window".into());
+    }
+    lens_request_internal(window.app_handle(), "floatingCapture")
+}
+
 /// Draft attachment only. Never enqueue an external send or take a path from the renderer.
 #[tauri::command]
 pub(crate) async fn lens_open_floating_chat(
@@ -1200,14 +1218,13 @@ pub(crate) async fn lens_open_floating_chat(
     app.state::<windows::floating::FloatingChat>()
         .inbox
         .stage(&path, copy, || {
-            open_chat_window(&app)?;
             let (_, original) = state.lens().close_captured_session(&image_id)?;
             cleanup_temp_file(&original);
             finish_lens_close(&app, seq);
             Ok(())
         })?;
     // Cold renderer can miss this: it also drains the inbox after subscribing.
-    if let Err(error) = app.emit_to("chat", "chat-floating-captures-ready", ()) {
+    if let Err(error) = app.emit_to(windows::floating::LABEL, "chat-floating-captures-ready", ()) {
         // Already committed. Reporting a failed handoff here would invite a duplicate retry.
         eprintln!("[floating-chat] capture queued, ready notification failed: {error}");
     }
@@ -2385,7 +2402,7 @@ fn finish_lens_close(app: &AppHandle, closing_seq: u64) {
         // 下次触发由 ensure_lens_window / ensure_translate_window 重建。
         // 先 hide 再 destroy：直接 destroy 会触发 Windows 的窗口关闭动画（全屏浮层往中间缩，
         // 即视觉回归）。先即时 hide 让它瞬间消失，再销毁已不可见的窗口就没有可见动画。
-        #[cfg(target_os = "windows")]
+        #[cfg(not(target_os = "macos"))]
         {
             let _ = window.hide();
             let _ = window.destroy();
@@ -2393,7 +2410,7 @@ fn finish_lens_close(app: &AppHandle, closing_seq: u64) {
         // macOS：浮窗被 object_setClass 换成了自定义 NSPanel 子类，destroy() 时 tao/wry 按原类
         // 清理会抛 ObjC 异常穿过 FFI → "Rust cannot catch foreign exceptions" abort。所以只能
         // 复用（隐藏 + 复位全屏几何，避免下次 show 还停在上次浮动 bar 位置）。
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "macos")]
         {
             // macOS：换回原窗口类后 destroy，终结 WebContent 进程回收内存（about:blank 实测
             // 不回收，只有销毁进程才行）。下次触发由 ensure_lens/translate_window 冷重建。
@@ -2403,7 +2420,6 @@ fn finish_lens_close(app: &AppHandle, closing_seq: u64) {
     }
     #[cfg(target_os = "macos")]
     windows::restore_previous_frontmost_app(app, state.frontmost_apps().lens());
-    #[cfg(target_os = "windows")]
     windows::floating::restore_after_capture(app, closing_seq);
 }
 

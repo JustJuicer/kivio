@@ -27,6 +27,7 @@ import { getTranslationLanguageOptions } from './settings/public/translationLang
 
 const Lens = lazy(() => import('./Lens'))
 const Chat = lazy(() => import('./chat/Chat'))
+const FloatingChat = lazy(() => import('./chat/FloatingChat'))
 const ChatPopout = lazy(() => import('./chat/popout/ChatPopout'))
 
 /**
@@ -282,6 +283,7 @@ function App() {
   }
 
   const [mode, setMode] = useState(getMode)
+  const floatingWindow = useRef(mode === 'floating-chat')
   const [translucentSidebar, setTranslucentSidebar] = useState(false)
   const [translateSource, setTranslateSource] = useState<string>('')
   const [lang, setLang] = useState<Lang>('zh')
@@ -328,7 +330,7 @@ function App() {
     // UI 字号（整体缩放）+ 自定义字体：仅作用于聊天窗口，翻译窗/Lens 保持原始几何与布局。
     // 直接读 hash（稳定的 import）而非 mode state，避免让 applyTheme 变成不稳定依赖。
     const root = document.documentElement
-    if (isChatPath(hashPath())) {
+    if (isChatPath(hashPath()) || hashPath() === 'floating-chat') {
       const scale = Math.min(1.4, Math.max(0.8, settings.uiFontScale ?? 1))
       // 用原生 webview 缩放（等同浏览器 Cmd+加号），而非 CSS zoom —— CSS zoom 会打乱
       // 聊天消息列表 virtualizer 虚拟滚动的 scrollTop/scrollHeight 几何量，导致流式生成时跟随钉底失效。
@@ -377,6 +379,11 @@ function App() {
   // 监听 hash 变化切换模式
   useEffect(() => {
     const handler = () => {
+      if (floatingWindow.current) {
+        // Shared content may contain chat links. A native window never changes roles.
+        if (hashPath() !== 'floating-chat') window.history.replaceState(null, '', '#floating-chat')
+        return
+      }
       const path = hashPath()
       const nextMode = getMode()
       if (isChatPath(path)) {
@@ -389,7 +396,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!isTauriRuntime()) return
+    if (mode !== 'chat' || !isTauriRuntime()) return
     let cancelled = false
     let cleanup: (() => void) | undefined
 
@@ -418,7 +425,7 @@ function App() {
       cancelled = true
       cleanup?.()
     }
-  }, [])
+  }, [mode])
 
   const persistChatWindowGeometry = useCallback(async () => {
     if (!isTauriRuntime()) return
@@ -554,6 +561,14 @@ function App() {
       <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--theme-surface-border)] border-t-[var(--text)]" />
     </div>
   )
+  if (mode === 'floating-chat') {
+    return <div className="chat-window-host h-full w-full">
+      <AppNoticeHost lang={lang} />
+      <ChatErrorBoundary><Suspense fallback={<div className="chat-window-shell" data-floating />}>
+        <FloatingChat lang={lang} />
+      </Suspense></ChatErrorBoundary>
+    </div>
+  }
   if (mode === 'chat-popout') {
     return (
       <ChatWindowHost translucentSidebar={translucentSidebar}>

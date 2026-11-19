@@ -51,10 +51,8 @@ import {
   setHash,
 } from './chatRoutes'
 import { AsyncQuestionsContext } from './asyncQuestionsContext'
+import { notifyError } from '../components/appNoticeStore'
 import { ChatTitlebar } from './ChatTitlebar'
-import { useFloatingChat } from './hooks/useFloatingChat'
-import { useFloatingCaptures } from './hooks/useFloatingCaptures'
-import { FloatingChatTitlebar } from './FloatingChatTitlebar'
 import { WindowControls } from './WindowControls'
 import { usePanelShiftMotion } from './usePanelShiftMotion'
 import { deriveToolStatusHint, findUnavailableRecommendedTools } from './toolAvailability'
@@ -83,10 +81,11 @@ import {
   normalizeAgentRuntime,
 } from './api'
 import { loadLastAgentRuntime, saveLastAgentRuntime } from './lastAgentRuntime'
-import { loadLastModel, resolvePreferredChatModel } from '../data/chatModelPreference'
+import { loadLastModel } from '../data/chatModelPreference'
 import {
   loadLastThinkingLevel,
   loadLastWebSearchMode,
+  preferredComposerModel,
   persistLastChatModelToSettings,
 } from './composerPreferences'
 import {
@@ -1135,23 +1134,7 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
       const settings = await getSettingsCached()
       setUiLang((settings.settingsLanguage as Lang) || 'zh')
       const last = loadLastModel()
-      const preferred = resolvePreferredChatModel({
-        providers: settings.providers || [],
-        last,
-        storedChat: settings.defaultModels?.chat ?? { providerId: '', model: '' },
-        legacyChat: {
-          providerId: settings.chatProviderId || '',
-          model: settings.chatModel || '',
-        },
-        lens: {
-          providerId: settings.lens?.providerId || '',
-          model: settings.lens?.model || '',
-        },
-        translator: {
-          providerId: settings.translatorProviderId || '',
-          model: settings.translatorModel || '',
-        },
-      })
+      const preferred = preferredComposerModel(settings, last)
       setDraftProviderId(preferred.providerId)
       setDraftModel(preferred.model)
       // 聊天里选过的模型才写回 settings，避免把 Lens/翻译回落误当成 Chat 默认。
@@ -2602,39 +2585,14 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
     }
   }, [navigation, popoutOwner])
 
-  const { floating, pinned, busy: floatingBusy, changeMode, togglePin } = useFloatingChat(i18n[uiLang].chatFloatingFailed, emitContentReady)
-  useEffect(() => {
-    const enter = (event: Event) => {
-      const newDraft = event instanceof CustomEvent && event.detail?.newDraft === true
-      if (chatView === 'onboarding' && !newDraft) return
-      runAfterLeavingEditors(() => {
-        setSearchOpen(false)
-        if (newDraft && (hashPath() !== 'chat' || currentConversationIdRef.current)) {
-          navigation.startNewConversation()
-          setChatView('conversation')
-        } else if (chatView !== 'conversation') {
-          setChatView('conversation')
-          syncConversationRoute(currentConversationIdRef.current)
-        }
-        void changeMode(true)
-      }, { restoreCurrentRoute: !newDraft })
-    }
-    window.addEventListener('kivio:enter-floating-chat', enter)
-    return () => window.removeEventListener('kivio:enter-floating-chat', enter)
-  }, [changeMode, chatView, currentConversationIdRef, navigation, runAfterLeavingEditors, syncConversationRoute])
-  useFloatingCaptures(() => {
-    const reuseConversation = floating && chatView === 'conversation' && !conversationOccupied
-    return {
-      key: draftKey(reuseConversation ? currentConversationIdRef.current : null),
-      reveal: () => window.dispatchEvent(new CustomEvent('kivio:enter-floating-chat', { detail: { newDraft: !reuseConversation } })),
-    }
-  })
+  const openFloating = useCallback(() => {
+    void chatApi.toggleFloatingWindow().catch(error => notifyError(String(error)))
+  }, [])
 
   // 会话页顶栏控件。非 mac 渲染进全宽标题栏带（单行 chrome），mac 仍留在主区 52px 顶栏。
   const conversationTitlebarControls = useMemo(() => (
     <ConversationTitlebarControls
-      onEnterFloating={conversationOccupied ? undefined : () => void changeMode(true)}
-      floatingBusy={floatingBusy}
+      onEnterFloating={openFloating}
       activeAgentRuntime={activeAgentRuntime}
       externalAgent={activeExternalAgent}
       conversationId={currentConversation?.id ?? null}
@@ -2697,7 +2655,7 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
       contextState={contextState}
     />
   ), [
-    changeMode, floatingBusy,
+    openFloating,
     activeAgentRuntime,
     activeExternalAgent,
     activeModel,
@@ -2961,7 +2919,7 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
     resolvePendingSessionConsent, resolvePendingToolConfirm,
   ])
 
-  const showConversationDock = !floating && chatView === 'conversation' && !conversationOccupied
+  const showConversationDock = chatView === 'conversation' && !conversationOccupied
     && (!usesChatRuntime || Boolean(dock.subagent.selection))
   // 侧栏 / 右侧面板开合时，主区内容平移到新位置（只动 transform，不逐帧重排）。
   const [panelRow, setPanelRow] = useState<HTMLDivElement | null>(null)
@@ -2976,21 +2934,10 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
     <Profiler id="ChatShell" onRender={onChatPerfProfiler}>
     <VoiceCallContext.Provider value={voiceCall}>
       <div
-        data-floating={floating || undefined}
         className={`chat-window-shell${usesNativeTitlebar ? ' chat-window-shell--native-titlebar' : ''}`}
       >
       {/* 引导页整窗铺满：不渲染标题栏带，窗口三键由引导页自己的顶栏承载。 */}
-      {floating && <FloatingChatTitlebar
-        title={currentConversation?.title}
-        listOpen={searchOpen}
-        onOpenList={() => setSearchOpen(true)}
-        onNew={handleTitlebarNewConversation}
-        pinned={pinned}
-        busy={floatingBusy}
-        onTogglePin={togglePin}
-        onRestore={() => void changeMode(false)}
-      />}
-      {!floating && !usesNativeTitlebar && chatView !== 'onboarding' && (
+      {!usesNativeTitlebar && chatView !== 'onboarding' && (
         <ChatTitlebar
           sidebarExpanded={!sidebarCollapsed}
           /* 与下方 <Sidebar collapsed> 取反同源：设置页里侧栏也是收起的，
@@ -3038,7 +2985,7 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
           settingsActive={settingsPanelActive}
           extensionsActive={extensionsActive}
           extensionEntries={catalog.filter(p => extensions.enabled.includes(p.manifest.id)).map(p => ({ id: `extension:${p.manifest.id}` as const, name: p.manifest.name }))}
-          collapsed={floating || sidebarCollapsed || settingsPanelActive}
+          collapsed={sidebarCollapsed || settingsPanelActive}
           onToggleCollapsed={handleCollapseSidebar}
           width={sidebarWidth}
           onWidthChange={handleSidebarWidthChange}
@@ -3196,7 +3143,7 @@ export default function Chat({ onSettingsChange, onContentReady }: ChatProps) {
         ) : (
           <ChatConversationPane
             titlebarControls={conversationTitlebarControls}
-            usesNativeTitlebar={!floating && usesNativeTitlebar}
+            usesNativeTitlebar={usesNativeTitlebar}
             sidebarCollapsed={sidebarCollapsed}
             titlebarRowClass={chatTitlebarRowClass}
             titlebarMacInsetClass={chatTitlebarMacInsetClass}

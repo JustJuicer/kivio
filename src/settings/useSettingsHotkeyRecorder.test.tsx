@@ -22,6 +22,16 @@ describe('useSettingsHotkeyRecorder', () => {
     expect(original.screenshotTranslation.textHotkey).toBe('old')
   })
 
+  it('replaces the floating shortcut without changing Lens', () => {
+    const edit = vi.fn()
+    const { result } = renderHook(() => useSettingsHotkeyRecorder(edit))
+    act(() => { result.current.toggle('floatingChat') })
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', altKey: true })) })
+    const update = edit.mock.calls[0][0] as (settings: Settings) => Settings
+    const original = { floatingChatHotkey: 'Alt+X', lens: { hotkey: 'Alt+L' } } as Settings
+    expect(update(original)).toEqual({ ...original, floatingChatHotkey: 'Alt+J' })
+  })
+
   it('only the active target receives a shortcut, and toggling it off removes capture', () => {
     const edit = vi.fn()
     const { result } = renderHook(() => useSettingsHotkeyRecorder(edit))

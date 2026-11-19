@@ -46,11 +46,13 @@ function readModeFromHash(): Mode {
   if (mode === 'translateText') return 'translateText'
   if (mode === 'replace') return 'replace'
   if (mode === 'screenshot') return 'screenshot'
+  if (mode === 'floatingCapture') return 'floatingCapture'
   return 'chat'
 }
 
 function keepFullscreenForMode(curMode: Mode, screenshotKeepFullscreen: boolean): boolean {
   return curMode === 'chat'
+    || curMode === 'floatingCapture'
     || curMode === 'replace'
     || curMode === 'screenshot'
     || (curMode === 'translate' && screenshotKeepFullscreen)
@@ -1274,7 +1276,7 @@ export default function Lens() {
         return
       }
       const newId = result.imageId
-      if (mode === 'chat') return await openCapturedChat(newId)
+      if (mode === 'floatingCapture') return await openCapturedChat(newId)
       captureImage(newId)
 
       // 记录截图框（webview 内坐标）作为已截视觉标记，截完保留显示
@@ -1334,13 +1336,13 @@ export default function Lens() {
         return
       }
       const newId = result.imageId
-      if (mode === 'chat') {
+      if (mode === 'floatingCapture') {
         // A retry by reselecting will use live pixels, not the consumed frozen frame.
         consumeFreezeFrame(false)
         return await openCapturedChat(newId)
       }
-      consumeFreezeFrame()
       captureImage(newId)
+      consumeFreezeFrame()
       // 不清 freezeFramePreview：截图后仍把冻结帧作为全屏背景保留，直到按 Esc 关闭 Lens
       // （enterSelect / resetAfterHide 会在重开 / 隐藏时清理）。
 

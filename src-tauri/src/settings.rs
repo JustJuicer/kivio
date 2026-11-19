@@ -2078,6 +2078,9 @@ pub struct Settings {
     /// 关闭 AI 客户端（chat 窗口）的全局热键。
     #[serde(default = "default_close_chat_hotkey")]
     pub close_chat_hotkey: String,
+    /// 切换悬浮聊天小窗，独立于 Lens。
+    #[serde(default = "default_floating_chat_hotkey")]
+    pub floating_chat_hotkey: String,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_theme_color")]
@@ -2303,6 +2306,7 @@ impl Default for Settings {
             hotkey: default_hotkey(),
             chat_hotkey: default_chat_hotkey(),
             close_chat_hotkey: default_close_chat_hotkey(),
+            floating_chat_hotkey: default_floating_chat_hotkey(),
             theme: "system".to_string(),
             theme_color: default_theme_color(),
             custom_themes: Vec::new(),
@@ -2865,6 +2869,7 @@ pub fn sanitize_settings(mut settings: Settings) -> Settings {
     settings.hotkey = normalize_hotkey(&settings.hotkey);
     settings.chat_hotkey = normalize_hotkey(&settings.chat_hotkey);
     settings.close_chat_hotkey = normalize_hotkey(&settings.close_chat_hotkey);
+    settings.floating_chat_hotkey = normalize_hotkey(&settings.floating_chat_hotkey);
     settings.screenshot_translation.hotkey =
         normalize_hotkey(&settings.screenshot_translation.hotkey);
     settings.screenshot_translation.text_hotkey =
@@ -3922,6 +3927,13 @@ fn default_close_chat_hotkey() -> String {
     "CommandOrControl+Shift+W".to_string()
 }
 
+fn default_floating_chat_hotkey() -> String {
+    if crate::app_data::is_dev() {
+        return String::new();
+    }
+    "CommandOrControl+Shift+J".to_string()
+}
+
 fn default_screenshot_translation_hotkey() -> String {
     if crate::app_data::is_dev() {
         return String::new();
@@ -4788,6 +4800,26 @@ mod tests {
             settings.providers[0].model_overrides["empty"].pricing_model,
             None
         );
+    }
+
+    #[test]
+    fn floating_chat_hotkey_uses_identity_default_for_missing_key_only() {
+        let from_disk = |value| {
+            let settings: Settings = serde_json::from_value(value).unwrap();
+            serde_json::to_value(sanitize_settings(settings)).unwrap()
+        };
+        let legacy = from_disk(serde_json::json!({}));
+        let default = if crate::app_data::is_dev() {
+            ""
+        } else {
+            "CommandOrControl+Shift+J"
+        };
+        assert_eq!(legacy["floatingChatHotkey"], default);
+        for (saved, expected) in [("", ""), ("cmd+shift+X", "CommandOrControl+Shift+X")] {
+            let restored = from_disk(serde_json::json!({ "floatingChatHotkey": saved }));
+            assert_eq!(restored["floatingChatHotkey"], expected);
+            assert_eq!(restored["lens"], legacy["lens"]);
+        }
     }
 
     #[test]

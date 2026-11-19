@@ -166,6 +166,7 @@ type HotkeyErrorPayload = {
     | 'translator'
     | 'chat'
     | 'close_chat'
+    | 'floating_chat'
     | 'screenshot'
     | 'screenshot_text'
     | 'screenshot_replace'
@@ -179,6 +180,7 @@ const SCOPE_KEY: Record<HotkeyErrorPayload['scope'], keyof typeof i18n.zh> = {
   translator: 'hotkeyScopeTranslator',
   chat: 'hotkeyScopeChat',
   close_chat: 'hotkeyScopeCloseChat',
+  floating_chat: 'floatingChatHotkeyLabel',
   screenshot: 'hotkeyScopeScreenshot',
   screenshot_text: 'hotkeyScopeScreenshotText',
   screenshot_replace: 'hotkeyScopeScreenshotReplace',

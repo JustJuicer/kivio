@@ -30,6 +30,7 @@ const ALL_SCOPES: HotkeyScopeKey[] = [
   'screenshotTranslationReplace',
   'screenshotAnnotate',
   'lens',
+  'floatingChat',
 ]
 
 function scopeLabel(scope: HotkeyScopeKey, t: I18n): string {
@@ -50,6 +51,8 @@ function scopeLabel(scope: HotkeyScopeKey, t: I18n): string {
       return t.annotateHotkeyLabel
     case 'lens':
       return t.lensTabLabel
+    case 'floatingChat':
+      return t.floatingChatHotkeyLabel
   }
 }
 
@@ -71,6 +74,8 @@ function hotkeyForScope(settings: SettingsData, scope: HotkeyScopeKey): string {
       return settings.screenshotAnnotate.hotkey
     case 'lens':
       return settings.lens.hotkey
+    case 'floatingChat':
+      return settings.floatingChatHotkey || ''
   }
 }
 
@@ -95,6 +100,7 @@ export function HotkeysTab({
       hotkey: DEFAULT_HOTKEYS.hotkey,
       chatHotkey: DEFAULT_HOTKEYS.chatHotkey,
       closeChatHotkey: DEFAULT_HOTKEYS.closeChatHotkey,
+      floatingChatHotkey: DEFAULT_HOTKEYS.floatingChatHotkey,
     })
     onUpdateScreenshotTranslation({
       hotkey: DEFAULT_HOTKEYS.screenshotHotkey,
@@ -285,6 +291,21 @@ export function HotkeysTab({
           onClear={() => onUpdateLens({ hotkey: '' })}
           clearLabel={t.hotkeyClear}
           error={conflictMessageFor('lens')}
+        />
+      </SettingRow>
+      <SettingRow label={t.floatingChatHotkeyLabel}>
+        <HotkeyInput
+          inline
+          value={settings.floatingChatHotkey || ''}
+          placeholder={t.hotkeyPlaceholder}
+          recording={recordingTarget === 'floatingChat'}
+          onToggleRecording={() => onToggleRecording('floatingChat')}
+          recordLabel={t.hotkeyRecord}
+          recordingLabel={t.hotkeyRecording}
+          recordingPlaceholder={t.hotkeyRecordingPlaceholder}
+          onClear={() => onUpdateSettings({ floatingChatHotkey: '' })}
+          clearLabel={t.hotkeyClear}
+          error={conflictMessageFor('floatingChat')}
         />
       </SettingRow>
     </SettingsGroup>

@@ -1234,6 +1234,7 @@ export type Settings = {
   chatHotkey: string
   /** 关闭 AI 客户端（chat 窗口）的全局热键。 */
   closeChatHotkey: string
+  floatingChatHotkey: string
   theme: 'system' | 'light' | 'dark'
   /** 主题 id：内置主题或 customThemes 中的自定义 id。非法选择由后端收成 neutral。 */
   themeColor: string

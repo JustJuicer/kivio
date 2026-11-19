@@ -37,7 +37,6 @@ export interface ConversationTitlebarControlsProps {
   /** 当前会话有运行中的回合：锁住 CLI 沙盒档位。 */
   busy: boolean
   onEnterFloating?: () => void
-  floatingBusy?: boolean
   onOpenPopout: (conversationId: string) => void
   onToggleDock: () => void
   /** 会话工作目录；无项目对话也可能有（Git 仍只给项目对话）。 */
@@ -74,7 +73,6 @@ export const ConversationTitlebarControls = memo(function ConversationTitlebarCo
   onSandboxChange,
   busy,
   onEnterFloating,
-  floatingBusy,
   onOpenPopout,
   onToggleDock,
   workdir,
@@ -143,7 +141,7 @@ export const ConversationTitlebarControls = memo(function ConversationTitlebarCo
       <div className="min-w-5 flex-1" data-tauri-drag-region />
       <div className="flex min-w-0 shrink items-center justify-end gap-1">
         {onEnterFloating && (
-          <IconButton label={i18n[uiLang].chatFloating} variant="ghost" disabled={floatingBusy} onClick={onEnterFloating} data-tauri-drag-region="false">
+          <IconButton label={i18n[uiLang].chatFloating} variant="ghost" onClick={onEnterFloating} data-tauri-drag-region="false">
             <PictureInPicture2 size={16} />
           </IconButton>
         )}

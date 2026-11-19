@@ -6,6 +6,7 @@ export const DEFAULT_HOTKEYS = {
   hotkey: 'CommandOrControl+Alt+T',
   chatHotkey: 'CommandOrControl+Shift+K',
   closeChatHotkey: 'CommandOrControl+Shift+W',
+  floatingChatHotkey: 'CommandOrControl+Shift+J',
   screenshotHotkey: 'CommandOrControl+Shift+A',
   screenshotTextHotkey: 'CommandOrControl+Shift+T',
   screenshotReplaceHotkey: 'CommandOrControl+Shift+R',

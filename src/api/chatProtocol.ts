@@ -33,20 +33,27 @@ const syncRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const exclusiveConversationIds = new Set<string>()
 let nativeListener: Promise<void> | null = null
 let subscribeConversationId: string | null = null
+let filterGeneration = 0
 let subscribeGeneration = 0
 let channelResetHooked = false
 
 const CHAT_PROTOCOL_CHANNEL_RESET_EVENT = 'chat-protocol-channel-reset'
 
-/** 弹出窗在订阅前调用：该 WebView 的通道只收这一条对话。主窗不要调。 */
+/** null = main window (all); empty string = independent window with no selected session. */
 export function configureChatProtocolFilter(conversationId: string | null) {
   if (subscribeConversationId === conversationId) return
   subscribeConversationId = conversationId
-  // 已经订过 All 的话必须重订，否则 nativeListener 单例会把错误的 filter 钉死到窗口关掉。
-  if (nativeListener) {
-    nativeListener = null
-    void ensureListener()
-  }
+  filterGeneration += 1
+  subscribeGeneration += 1
+  nativeListener = null
+  // Session presentation is remounted. Resume from a fresh snapshot, not an old
+  // cursor whose matching preview no longer exists in this WebView.
+  runs.clear()
+  liveDuringSync.clear()
+  syncing.clear()
+  for (const timer of syncRetryTimers.values()) clearTimeout(timer)
+  syncRetryTimers.clear()
+  syncRetryAttempts.clear()
 }
 
 /** 主窗 All 订阅者：这些对话的高频帧被独占路由跳过，seq 缺口不要当丢包去 sync。 */
@@ -399,7 +406,7 @@ function conversationIdsToResync(): string[] {
 async function startListener() {
   const generation = ++subscribeGeneration
   const channel = new Channel<unknown>()
-  channel.onmessage = handleLiveEvent
+  channel.onmessage = event => { if (generation === subscribeGeneration) handleLiveEvent(event) }
   const conversationId = subscribeConversationId
   await invoke('chat_protocol_subscribe', {
     channel,
@@ -414,6 +421,7 @@ async function ensureListener() {
   // 广播 + 逐 WebView 反序列化。WebView 重载后模块级单例归零，重新订阅即替换
   // 该窗口 label 的槽；弹出窗带 conversationId 只收自己那条对话。
   // 订阅空窗期丢掉的事件由挂载时的 chat_sync_state 对账补齐。
+  if (subscribeConversationId === '') return
   nativeListener ??= startListener().catch((error) => {
     nativeListener = null
     throw error
@@ -450,11 +458,13 @@ export function subscribeChatProtocolIssues(
 }
 
 export async function syncChatProtocol(conversationId: string) {
-  if (!conversationId || syncing.has(conversationId)) return
+  if (!conversationId || (subscribeConversationId !== null && subscribeConversationId !== conversationId) || syncing.has(conversationId)) return
   syncing.add(conversationId)
+  const generation = filterGeneration
   let acceptedSync = false
   try {
     await ensureListener()
+    if (generation !== filterGeneration) return
     // 只给还在跑的 run 带 cursor：后端 5 分钟后会剪掉已完成的 run，
     // 再带着它们的 cursor 去 sync 只会被算进 missingRunIds，白触发一次全量 reload。
     // run 的状态本身要留着（快照恢复/去重还要用），所以是不带 cursor，不是删。
@@ -464,6 +474,7 @@ export async function syncChatProtocol(conversationId: string) {
     const result = await invoke<unknown>('chat_sync_state', {
       request: { protocolVersion: CHAT_PROTOCOL_VERSION, conversationId, cursors },
     })
+    if (generation !== filterGeneration) return
     const resultVersion = typeof result === 'object' && result !== null
       ? (result as { protocolVersion?: unknown }).protocolVersion
       : undefined
@@ -513,6 +524,7 @@ export async function syncChatProtocol(conversationId: string) {
       }
     }
   } catch (error) {
+    if (generation !== filterGeneration) return
     if (String(error).toLowerCase().includes('protocol version mismatch')) {
       reportIssue('version_mismatch')
       return
@@ -520,16 +532,18 @@ export async function syncChatProtocol(conversationId: string) {
     console.error('Failed to synchronize chat protocol state', error)
     retrySync(conversationId)
   } finally {
-    syncing.delete(conversationId)
-    const queued = liveDuringSync.get(conversationId) ?? []
-    liveDuringSync.delete(conversationId)
-    queued.sort((left, right) => left.seq - right.seq)
-    for (const event of queued) applyRunEvent(event)
-    const unresolvedGap = [...runs.values()].some(
-      (state) => state.conversationId === conversationId && state.pending.size > 0 && !state.terminal,
-    )
-    if (acceptedSync && unresolvedGap) retrySync(conversationId)
-    else if (acceptedSync) syncRetryAttempts.delete(conversationId)
+    if (generation === filterGeneration) {
+      syncing.delete(conversationId)
+      const queued = liveDuringSync.get(conversationId) ?? []
+      liveDuringSync.delete(conversationId)
+      queued.sort((left, right) => left.seq - right.seq)
+      for (const event of queued) applyRunEvent(event)
+      const unresolvedGap = [...runs.values()].some(
+        (state) => state.conversationId === conversationId && state.pending.size > 0 && !state.terminal,
+      )
+      if (acceptedSync && unresolvedGap) retrySync(conversationId)
+      else if (acceptedSync) syncRetryAttempts.delete(conversationId)
+    }
   }
 }
 

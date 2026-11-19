@@ -27,6 +27,7 @@ function renderTab(overrides: Partial<Parameters<typeof HotkeysTab>[0]> = {}) {
         model: 'm',
       },
       screenshotAnnotate: { hotkey: 'Alt+7' },
+      floatingChatHotkey: 'Alt+9',
       lens: { hotkey: 'Alt+8' },
     } as never),
     t,
@@ -56,6 +57,7 @@ describe('HotkeysTab', () => {
       [t.replaceTranslateHotkey, '6'],
       [t.annotateHotkeyLabel, '7'],
       [t.lensTabLabel, '8'],
+      ['悬浮小窗', '9'],
     ]
     for (const [label, digit] of rows) {
       const row = screen.getByText(label).closest<HTMLElement>('.kv-row')!
@@ -75,6 +77,8 @@ describe('HotkeysTab', () => {
     // 第 4-6 个是截图翻译系列，第 7 个标注，第 8 个 Lens
     await userEvent.click(buttons[7])
     expect(props.onToggleRecording).toHaveBeenCalledWith('lens')
+    await userEvent.click(buttons[8])
+    expect(props.onToggleRecording).toHaveBeenCalledWith('floatingChat')
   })
 
   it('清除按钮走各自的 updater 且写对字段', async () => {
@@ -104,6 +108,8 @@ describe('HotkeysTab', () => {
 
     await userEvent.click(clears[7])
     expect(props.onUpdateLens).toHaveBeenCalledWith({ hotkey: '' })
+    await userEvent.click(clears[8])
+    expect(props.onUpdateSettings).toHaveBeenCalledWith({ floatingChatHotkey: '' })
   })
 
   it('冲突提示按 scope 透传', () => {
@@ -131,6 +137,7 @@ describe('HotkeysTab', () => {
       hotkey: 'CommandOrControl+Alt+T',
       chatHotkey: 'CommandOrControl+Shift+K',
       closeChatHotkey: 'CommandOrControl+Shift+W',
+      floatingChatHotkey: 'CommandOrControl+Shift+J',
     })
     expect(props.onUpdateScreenshotTranslation).toHaveBeenCalledWith({
       hotkey: 'CommandOrControl+Shift+A',

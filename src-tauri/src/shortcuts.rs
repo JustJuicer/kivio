@@ -475,6 +475,7 @@ enum HotkeyScope {
     Translator,
     Chat,
     CloseChat,
+    FloatingChat,
     Screenshot,
     ScreenshotText,
     ScreenshotReplace,
@@ -552,6 +553,7 @@ pub(crate) fn hotkey_bindings_changed(previous: &Settings, next: &Settings) -> b
     previous.hotkey != next.hotkey
         || previous.chat_hotkey != next.chat_hotkey
         || previous.close_chat_hotkey != next.close_chat_hotkey
+        || previous.floating_chat_hotkey != next.floating_chat_hotkey
         || previous.screenshot_translation.enabled != next.screenshot_translation.enabled
         || previous.screenshot_translation.hotkey != next.screenshot_translation.hotkey
         || previous.screenshot_translation.text_hotkey != next.screenshot_translation.text_hotkey
@@ -879,6 +881,35 @@ pub(crate) fn register_hotkeys_for_settings(
             errors.push(classify_hotkey_error(
                 HotkeyScope::Automation,
                 hotkey,
+                err.to_string(),
+            ));
+        }
+    }
+
+    // Register last so an older custom binding (including Lens) wins on startup.
+    let hotkey = settings.floating_chat_hotkey.trim();
+    if !hotkey.is_empty() {
+        if registered.contains(&hotkey.to_lowercase()) || shortcut_manager.is_registered(hotkey) {
+            errors.push(HotkeyError {
+                kind: HotkeyErrorKind::Duplicate,
+                scope: HotkeyScope::FloatingChat,
+                hotkey: hotkey.into(),
+                raw: None,
+            });
+        } else if let Err(err) = shortcut_manager.on_shortcut(hotkey, |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                // WebView2 creation must not block the native hotkey event loop.
+                let app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(err) = crate::windows::floating::toggle_floating_chat_window(&app) {
+                        eprintln!("Floating chat hotkey trigger error: {err}");
+                    }
+                });
+            }
+        }) {
+            errors.push(classify_hotkey_error(
+                HotkeyScope::FloatingChat,
+                hotkey.into(),
                 err.to_string(),
             ));
         }
@@ -1533,6 +1564,11 @@ mod runtime_settings_tests {
     #[test]
     fn registration_fields_do_reinstall_global_hotkeys() {
         let previous = Settings::default();
+        let mut next = previous.clone();
+        next.floating_chat_hotkey = "Alt+J".into();
+        assert!(hotkey_bindings_changed(&previous, &next));
+        assert!(hotkey_bindings_changed(&next, &previous));
+
         let mut next = previous.clone();
         next.chat_hotkey = "Control+Shift+Q".into();
         assert!(hotkey_bindings_changed(&previous, &next));

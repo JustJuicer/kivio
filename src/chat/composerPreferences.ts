@@ -1,4 +1,5 @@
-import { updateSettingsCached } from '../api/settingsCache'
+import { loadLastModel, resolvePreferredChatModel } from '../data/chatModelPreference'
+import { getSettingsCached, updateSettingsCached } from '../api/settingsCache'
 import type { ThinkingLevel, WebSearchMode } from './types'
 
 /**
@@ -56,6 +57,26 @@ export function saveLastThinkingLevel(level: ThinkingLevel | null): void {
   } catch {
     /* ignore */
   }
+}
+
+export function preferredComposerModel(settings: Awaited<ReturnType<typeof getSettingsCached>>, last = loadLastModel()) {
+  return resolvePreferredChatModel({
+    providers: settings.providers || [],
+    last,
+    storedChat: settings.defaultModels?.chat ?? { providerId: '', model: '' },
+    legacyChat: {
+      providerId: settings.chatProviderId || '',
+      model: settings.chatModel || '',
+    },
+    lens: {
+      providerId: settings.lens?.providerId || '',
+      model: settings.lens?.model || '',
+    },
+    translator: {
+      providerId: settings.translatorProviderId || '',
+      model: settings.translatorModel || '',
+    },
+  })
 }
 
 /** 把聊天里刚选的模型同步进 settings，供 Mixer / 后端回落，不当作引导里的「默认模型」。 */

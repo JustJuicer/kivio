@@ -59,17 +59,6 @@
   box-shadow: none;
 }
 
-/* Compact mode reuses the live pane/editor; reserve the small viewport for the conversation. */
-.chat-window-shell[data-floating] .chat-empty-hero-heading,
-.chat-window-shell[data-floating] .chat-sidebar-shell {
-  display: none;
-}
-
-.chat-window-shell[data-floating] .chat-empty-hero {
-  padding: 0.75rem;
-  justify-content: flex-end;
-}
-
 /* ===== 齐边分栏：面板共用窗口外壳，仅在栏间绘制分隔线 ===== */
 /* 保留标题栏与引导页使用的间距变量。 */
 :root {
